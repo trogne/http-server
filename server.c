@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define DEFAULT_PORT 8080
@@ -36,6 +38,10 @@ static connection_queue queue = {
 };
 static volatile sig_atomic_t stop_requested = 0;
 static volatile sig_atomic_t listen_fd = -1;
+static _Atomic unsigned long long requests_served = 0;
+static _Atomic unsigned long long active_connections = 0;
+static long configured_threads = DEFAULT_THREADS;
+static time_t started_at;
 
 static void handle_signal(int signal_number) {
     (void)signal_number;
@@ -130,6 +136,75 @@ static void send_response(int fd, int status, const char *reason,
     }
 }
 
+static int hex_value(char character) {
+    if (character >= '0' && character <= '9') return character - '0';
+    if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+    if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+    return -1;
+}
+
+static bool decode_component(const char *input, size_t length, char *output, size_t capacity) {
+    size_t used = 0;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char character = (unsigned char)input[i];
+        if (character == '%' && i + 2 < length) {
+            int high = hex_value(input[i + 1]);
+            int low = hex_value(input[i + 2]);
+            if (high < 0 || low < 0) return false;
+            character = (unsigned char)((high << 4) | low);
+            i += 2;
+        } else if (character == '+') {
+            character = ' ';
+        }
+        if (character == '\0' || used + 1 >= capacity) return false;
+        output[used++] = (char)character;
+    }
+    output[used] = '\0';
+    return true;
+}
+
+static bool query_parameter(const char *query, const char *key, char *value, size_t capacity) {
+    size_t key_length = strlen(key);
+    while (query != NULL && *query != '\0') {
+        const char *end = strchr(query, '&');
+        size_t pair_length = end == NULL ? strlen(query) : (size_t)(end - query);
+        const char *equals = memchr(query, '=', pair_length);
+        size_t name_length = equals == NULL ? pair_length : (size_t)(equals - query);
+        if (name_length == key_length && strncmp(query, key, key_length) == 0) {
+            const char *encoded = equals == NULL ? query + pair_length : equals + 1;
+            size_t encoded_length = equals == NULL ? 0 : pair_length - name_length - 1;
+            return decode_component(encoded, encoded_length, value, capacity);
+        }
+        query = end == NULL ? NULL : end + 1;
+    }
+    return false;
+}
+
+static void html_escape(const char *input, char *output, size_t capacity) {
+    size_t used = 0;
+    while (*input != '\0' && used + 1 < capacity) {
+        const char *replacement = NULL;
+        switch (*input) {
+            case '&': replacement = "&amp;"; break;
+            case '<': replacement = "&lt;"; break;
+            case '>': replacement = "&gt;"; break;
+            case '\"': replacement = "&quot;"; break;
+            case '\'': replacement = "&#39;"; break;
+            default: break;
+        }
+        if (replacement != NULL) {
+            size_t length = strlen(replacement);
+            if (used + length >= capacity) break;
+            memcpy(output + used, replacement, length);
+            used += length;
+        } else {
+            output[used++] = *input;
+        }
+        input++;
+    }
+    output[used] = '\0';
+}
+
 static ssize_t read_request_headers(int fd, char *buffer, size_t capacity) {
     size_t used = 0;
     while (used + 1 < capacity) {
@@ -186,15 +261,48 @@ static void handle_connection(int client_fd) {
         return;
     }
 
+    unsigned long long request_number = atomic_fetch_add(&requests_served, 1) + 1;
+    char *query = strchr(target, '?');
+    if (query != NULL) {
+        *query++ = '\0';
+    }
+
     if (strcmp(target, "/") == 0) {
-        const char *body =
+        char name[256] = "visitor";
+        (void)query_parameter(query, "name", name, sizeof(name));
+        char safe_name[1536];
+        html_escape(name, safe_name, sizeof(safe_name));
+        char body[3072];
+        int length = snprintf(body, sizeof(body),
             "<!doctype html><html><head><meta charset=\"utf-8\">"
             "<title>pthread HTTP server</title></head><body>"
-            "<h1>It works!</h1><p>Served by a pthread worker pool on Linux.</p>"
-            "</body></html>\n";
+            "<h1>It works!</h1><p>Hello, %s!</p>"
+            "<p>This is request #%llu, served dynamically by %ld worker threads.</p>"
+            "<p>Try <a href=\"/?name=Ada\">/?name=Ada</a> or <a href=\"/api/stats\">/api/stats</a>.</p>"
+            "</body></html>\n",
+            safe_name, request_number, configured_threads);
+        if (length < 0 || (size_t)length >= sizeof(body)) {
+            send_response(client_fd, 500, "Internal Server Error", "text/plain; charset=utf-8",
+                          "Could not build response.\n", head_only);
+            return;
+        }
         send_response(client_fd, 200, "OK", "text/html; charset=utf-8", body, head_only);
     } else if (strcmp(target, "/health") == 0) {
         send_response(client_fd, 200, "OK", "application/json", "{\"status\":\"ok\"}\n", head_only);
+    } else if (strcmp(target, "/api/stats") == 0) {
+        time_t now = time(NULL);
+        long long uptime = now >= started_at ? (long long)(now - started_at) : 0;
+        char body[256];
+        int length = snprintf(body, sizeof(body),
+            "{\"status\":\"ok\",\"uptime_seconds\":%lld,\"requests\":%llu,"
+            "\"active_connections\":%llu,\"worker_threads\":%ld}\n",
+            uptime, request_number, atomic_load(&active_connections), configured_threads);
+        if (length < 0 || (size_t)length >= sizeof(body)) {
+            send_response(client_fd, 500, "Internal Server Error", "text/plain; charset=utf-8",
+                          "Could not build response.\n", head_only);
+            return;
+        }
+        send_response(client_fd, 200, "OK", "application/json", body, head_only);
     } else {
         send_response(client_fd, 404, "Not Found", "text/plain; charset=utf-8",
                       "Not found.\n", head_only);
@@ -208,7 +316,9 @@ static void *worker_main(void *unused) {
         if (client_fd < 0) {
             break;
         }
+        atomic_fetch_add(&active_connections, 1);
         handle_connection(client_fd);
+        atomic_fetch_sub(&active_connections, 1);
         close(client_fd);
     }
     return NULL;
@@ -254,6 +364,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Usage: %s [port 1-65535] [threads 1-256]\n", argv[0]);
         return EXIT_FAILURE;
     }
+    configured_threads = thread_count;
+    started_at = time(NULL);
 
     struct sigaction action = {0};
     action.sa_handler = handle_signal;

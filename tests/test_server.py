@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import concurrent.futures
 import http.client
+import json
 import signal
 import socket
 import subprocess
@@ -55,6 +56,13 @@ def main():
         assert b"It works!" in body
         assert headers["Content-Type"].startswith("text/html")
 
+        status, _, body = request(port, path="/?name=Ada%20Lovelace")
+        assert status == 200 and b"Hello, Ada Lovelace!" in body
+
+        status, _, body = request(port, path="/?name=%3Cscript%3E")
+        assert status == 200
+        assert b"&lt;script&gt;" in body and b"<script>" not in body
+
         status, headers, body = request(port, "HEAD", "/")
         assert status == 200
         assert body == b""
@@ -62,6 +70,15 @@ def main():
 
         status, _, body = request(port, path="/health")
         assert status == 200 and body == b'{"status":"ok"}\n'
+
+        status, headers, body = request(port, path="/api/stats")
+        stats = json.loads(body)
+        assert status == 200
+        assert headers["Content-Type"] == "application/json"
+        assert stats["status"] == "ok"
+        assert stats["requests"] >= 6
+        assert stats["active_connections"] >= 1
+        assert stats["worker_threads"] == 8
 
         assert request(port, path="/missing")[0] == 404
         assert request(port, method="POST")[0] == 405

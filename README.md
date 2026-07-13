@@ -1,9 +1,11 @@
 # Multithreaded HTTP server in C
 
 A small Linux HTTP/1.1 server using a bounded connection queue and a fixed
-`pthread` worker pool. It supports `GET` and `HEAD` for `/` and `/health`,
-returns useful HTTP errors, applies socket timeouts, and shuts down on
-`SIGINT` or `SIGTERM`.
+`pthread` worker pool. It supports `GET` and `HEAD`, generates personalized
+request-time HTML at `/?name=Ada`, and exposes live process data at
+`/api/stats`. The stable `/health` endpoint remains available for health
+checks. It also returns useful HTTP errors, applies socket timeouts, and shuts
+down on `SIGINT` or `SIGTERM`.
 
 ## Test it from Windows with Docker Desktop
 

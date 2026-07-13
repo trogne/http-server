@@ -2,11 +2,14 @@
 import concurrent.futures
 import http.client
 import json
+import os
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 
 def free_port():
@@ -19,87 +22,105 @@ def request(port, method="GET", path="/"):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
     connection.request(method, path)
     response = connection.getresponse()
-    body = response.read()
-    result = response.status, dict(response.getheaders()), body
+    result = response.status, dict(response.getheaders()), response.read()
     connection.close()
     return result
 
 
-def wait_until_ready(process, port):
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline:
+def wait_ready(process, port):
+    for _ in range(160):
         if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            raise RuntimeError(f"server exited early\nstdout: {stdout}\nstderr: {stderr}")
+            out, err = process.communicate()
+            raise RuntimeError(f"server exited early\nstdout: {out}\nstderr: {err}")
         try:
             if request(port, path="/health")[0] == 200:
                 return
-        except (ConnectionError, OSError):
+        except OSError:
             time.sleep(0.05)
     raise RuntimeError("server did not become ready")
 
 
+def raw_request(port, payload):
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as sock:
+        sock.sendall(payload)
+        return sock.recv(4096)
+
+
 def main():
-    binary = sys.argv[1] if len(sys.argv) > 1 else "./http_server"
+    binary = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "./http_server")
     port = free_port()
-    process = subprocess.Popen(
-        [binary, str(port), "8"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        wait_until_ready(process, port)
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp) / "public"
+        root.mkdir()
+        (root / "index.html").write_text("<h1>static home</h1>\n", encoding="utf-8")
+        (root / "app.css").write_text("body { color: green; }\n", encoding="utf-8")
+        (root / "data.bin").write_bytes(b"\x00\x01\x02")
+        log = Path(temp) / "access.log"
+        config = Path(temp) / "server.conf"
+        config.write_text(
+            f"port = {port}\nthreads = 8\nqueue_capacity = 64\n"
+            f"keepalive_timeout = 2\nkeepalive_requests = 10\n"
+            f"document_root = {root}\nlog_file = {log}\n",
+            encoding="utf-8",
+        )
+        process = subprocess.Popen(
+            [binary, "--config", str(config)], stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            wait_ready(process, port)
 
-        status, headers, body = request(port)
-        assert status == 200
-        assert b"It works!" in body
-        assert headers["Content-Type"].startswith("text/html")
+            status, headers, body = request(port)
+            assert status == 200 and body == b"<h1>static home</h1>\n"
+            assert headers["Content-Type"].startswith("text/html")
+            assert headers["X-Content-Type-Options"] == "nosniff"
 
-        status, _, body = request(port, path="/?name=Ada%20Lovelace")
-        assert status == 200 and b"Hello, Ada Lovelace!" in body
+            status, headers, body = request(port, path="/app.css?cache=1")
+            assert status == 200 and body.startswith(b"body")
+            assert headers["Content-Type"].startswith("text/css")
 
-        status, _, body = request(port, path="/?name=%3Cscript%3E")
-        assert status == 200
-        assert b"&lt;script&gt;" in body and b"<script>" not in body
+            status, headers, body = request(port, "HEAD", "/data.bin")
+            assert status == 200 and body == b"" and headers["Content-Length"] == "3"
+            assert headers["Content-Type"] == "application/octet-stream"
 
-        status, headers, body = request(port, "HEAD", "/")
-        assert status == 200
-        assert body == b""
-        assert int(headers["Content-Length"]) > 0
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/health")
+            first = connection.getresponse()
+            assert first.status == 200 and first.read() == b'{"status":"ok"}\n'
+            socket_id = connection.sock.fileno()
+            connection.request("GET", "/api/stats")
+            second = connection.getresponse()
+            stats = json.loads(second.read())
+            assert second.status == 200 and connection.sock.fileno() == socket_id
+            assert stats["worker_threads"] == 8 and stats["active_connections"] >= 1
+            connection.close()
 
-        status, _, body = request(port, path="/health")
-        assert status == 200 and body == b'{"status":"ok"}\n'
+            assert request(port, path="/missing")[0] == 404
+            assert request(port, method="POST")[0] == 405
+            assert raw_request(port, b"GET / HTTP/1.1\r\n\r\n").startswith(b"HTTP/1.1 400")
+            assert raw_request(port, b"GET /%2e%2e/secret HTTP/1.1\r\nHost: x\r\n\r\n").startswith(
+                b"HTTP/1.1 400"
+            )
 
-        status, headers, body = request(port, path="/api/stats")
-        stats = json.loads(body)
-        assert status == 200
-        assert headers["Content-Type"] == "application/json"
-        assert stats["status"] == "ok"
-        assert stats["requests"] >= 6
-        assert stats["active_connections"] >= 1
-        assert stats["worker_threads"] == 8
+            with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+                results = list(pool.map(lambda _: request(port, path="/health"), range(200)))
+            assert all(s == 200 and b == b'{"status":"ok"}\n' for s, _, b in results)
 
-        assert request(port, path="/missing")[0] == 404
-        assert request(port, method="POST")[0] == 405
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
-            futures = [pool.submit(request, port, "GET", "/health") for _ in range(200)]
-            results = [future.result() for future in futures]
-        assert all(status == 200 and body == b'{"status":"ok"}\n'
-                   for status, _, body in results)
-        print("All HTTP and concurrency tests passed (200 requests, 32 clients).")
-    finally:
-        if process.poll() is None:
-            process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-        if process.returncode not in (0, -signal.SIGTERM):
-            stdout, stderr = process.communicate()
-            print(f"server output:\n{stdout}\n{stderr}", file=sys.stderr)
+            time.sleep(0.1)
+            lines = log.read_text(encoding="utf-8").splitlines()
+            assert len(lines) >= 209 and any('"GET /app.css?cache=1 HTTP/1.1" 200' in x for x in lines)
+            print("All HTTP, static-file, keep-alive, parser, logging, and concurrency tests passed.")
+        finally:
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            if process.returncode not in (0, -signal.SIGTERM):
+                out, err = process.communicate()
+                print(f"server output:\n{out}\n{err}", file=sys.stderr)
 
 
 if __name__ == "__main__":

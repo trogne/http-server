@@ -1,467 +1,554 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <pthread.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/sendfile.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
-#define DEFAULT_PORT 8080
-#define DEFAULT_THREADS 4
-#define QUEUE_CAPACITY 256
-#define REQUEST_CAPACITY 8192
+#define SERVER_NAME "dense-http/2.0"
+#define MAX_THREADS 256
+#define MAX_QUEUE 4096
+#define MAX_HEADER_BYTES 16384
+#define MAX_TARGET_BYTES 4096
+#define MAX_KEEPALIVE_REQUESTS 100
 
 typedef struct {
-    int sockets[QUEUE_CAPACITY];
-    size_t head;
-    size_t tail;
-    size_t count;
+    uint16_t port;
+    size_t threads;
+    size_t queue_capacity;
+    int keepalive_timeout;
+    size_t keepalive_requests;
+    char document_root[4096];
+    char log_file[4096];
+} server_config;
+
+typedef struct {
+    int *items;
+    size_t capacity, head, tail, count;
     bool stopping;
     pthread_mutex_t mutex;
     pthread_cond_t not_empty;
 } connection_queue;
 
-static connection_queue queue = {
-    .mutex = PTHREAD_MUTEX_INITIALIZER,
-    .not_empty = PTHREAD_COND_INITIALIZER,
-};
-static volatile sig_atomic_t stop_requested = 0;
-static volatile sig_atomic_t listen_fd = -1;
-static _Atomic unsigned long long requests_served = 0;
-static _Atomic unsigned long long active_connections = 0;
-static long configured_threads = DEFAULT_THREADS;
-static time_t started_at;
+typedef struct {
+    char method[16];
+    char target[MAX_TARGET_BYTES];
+    int major, minor;
+    bool keep_alive;
+    bool head_only;
+} http_request;
 
-static void handle_signal(int signal_number) {
-    (void)signal_number;
-    stop_requested = 1;
-    if (listen_fd >= 0) {
-        close((int)listen_fd);
-        listen_fd = -1;
+static server_config config = {
+    .port = 8080, .threads = 4, .queue_capacity = 256,
+    .keepalive_timeout = 5, .keepalive_requests = MAX_KEEPALIVE_REQUESTS,
+    .document_root = "./public", .log_file = "-"
+};
+static connection_queue queue;
+static volatile sig_atomic_t stopping;
+static volatile sig_atomic_t listener = -1;
+static _Atomic unsigned long long request_count;
+static _Atomic unsigned long long active_connections;
+static time_t started_at;
+static FILE *access_log;
+static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void on_signal(int signum) {
+    (void)signum;
+    stopping = 1;
+    if (listener >= 0) {
+        close((int)listener);
+        listener = -1;
     }
 }
 
-static bool parse_positive_number(const char *text, long min, long max, long *value) {
-    char *end = NULL;
+static char *trim(char *text) {
+    while (isspace((unsigned char)*text)) text++;
+    char *end = text + strlen(text);
+    while (end > text && isspace((unsigned char)end[-1])) *--end = '\0';
+    return text;
+}
+
+static bool contains_case_insensitive(const char *haystack, const char *needle) {
+    size_t length = strlen(needle);
+    for (; *haystack; haystack++)
+        if (!strncasecmp(haystack, needle, length)) return true;
+    return false;
+}
+
+static bool number(const char *text, unsigned long min, unsigned long max, unsigned long *out) {
+    char *end;
     errno = 0;
-    long parsed = strtol(text, &end, 10);
-    if (errno != 0 || end == text || *end != '\0' || parsed < min || parsed > max) {
-        return false;
-    }
-    *value = parsed;
+    unsigned long value = strtoul(text, &end, 10);
+    if (errno || end == text || *end || value < min || value > max) return false;
+    *out = value;
     return true;
 }
 
-static bool enqueue_connection(int client_fd) {
+static bool copy_setting(char *out, size_t capacity, const char *value) {
+    size_t length = strlen(value);
+    if (length == 0 || length >= capacity) return false;
+    memcpy(out, value, length + 1);
+    return true;
+}
+
+static bool apply_setting(const char *key, const char *value, const char *source, size_t line) {
+    unsigned long parsed;
+    bool ok = true;
+    if (!strcmp(key, "port")) {
+        ok = number(value, 1, 65535, &parsed); if (ok) config.port = (uint16_t)parsed;
+    } else if (!strcmp(key, "threads")) {
+        ok = number(value, 1, MAX_THREADS, &parsed); if (ok) config.threads = (size_t)parsed;
+    } else if (!strcmp(key, "queue_capacity")) {
+        ok = number(value, 1, MAX_QUEUE, &parsed); if (ok) config.queue_capacity = (size_t)parsed;
+    } else if (!strcmp(key, "keepalive_timeout")) {
+        ok = number(value, 1, 300, &parsed); if (ok) config.keepalive_timeout = (int)parsed;
+    } else if (!strcmp(key, "keepalive_requests")) {
+        ok = number(value, 1, 10000, &parsed); if (ok) config.keepalive_requests = (size_t)parsed;
+    } else if (!strcmp(key, "document_root")) {
+        ok = copy_setting(config.document_root, sizeof(config.document_root), value);
+    } else if (!strcmp(key, "log_file")) {
+        ok = copy_setting(config.log_file, sizeof(config.log_file), value);
+    } else {
+        fprintf(stderr, "%s:%zu: unknown setting '%s'\n", source, line, key);
+        return false;
+    }
+    if (!ok) fprintf(stderr, "%s:%zu: invalid value for %s\n", source, line, key);
+    return ok;
+}
+
+static bool load_config(const char *path) {
+    FILE *file = fopen(path, "r");
+    if (!file) { perror(path); return false; }
+    char *line = NULL;
+    size_t capacity = 0, line_number = 0;
+    bool valid = true;
+    while (getline(&line, &capacity, file) >= 0) {
+        line_number++;
+        char *entry = trim(line);
+        if (!*entry || *entry == '#') continue;
+        char *equals = strchr(entry, '=');
+        if (!equals) {
+            fprintf(stderr, "%s:%zu: expected key = value\n", path, line_number);
+            valid = false; continue;
+        }
+        *equals = '\0';
+        if (!apply_setting(trim(entry), trim(equals + 1), path, line_number)) valid = false;
+    }
+    if (ferror(file)) { perror(path); valid = false; }
+    free(line);
+    fclose(file);
+    return valid;
+}
+
+static bool queue_init(void) {
+    queue.items = calloc(config.queue_capacity, sizeof(*queue.items));
+    if (!queue.items) return false;
+    queue.capacity = config.queue_capacity;
+    if (pthread_mutex_init(&queue.mutex, NULL) || pthread_cond_init(&queue.not_empty, NULL)) {
+        free(queue.items); return false;
+    }
+    return true;
+}
+
+static bool enqueue(int fd) {
     bool accepted = false;
     pthread_mutex_lock(&queue.mutex);
-    if (!queue.stopping && queue.count < QUEUE_CAPACITY) {
-        queue.sockets[queue.tail] = client_fd;
-        queue.tail = (queue.tail + 1) % QUEUE_CAPACITY;
+    if (!queue.stopping && queue.count < queue.capacity) {
+        queue.items[queue.tail] = fd;
+        queue.tail = (queue.tail + 1) % queue.capacity;
         queue.count++;
-        accepted = true;
         pthread_cond_signal(&queue.not_empty);
+        accepted = true;
     }
     pthread_mutex_unlock(&queue.mutex);
     return accepted;
 }
 
-static int dequeue_connection(void) {
+static int dequeue(void) {
     pthread_mutex_lock(&queue.mutex);
-    while (queue.count == 0 && !queue.stopping) {
-        pthread_cond_wait(&queue.not_empty, &queue.mutex);
-    }
-    if (queue.count == 0 && queue.stopping) {
-        pthread_mutex_unlock(&queue.mutex);
-        return -1;
-    }
-    int client_fd = queue.sockets[queue.head];
-    queue.head = (queue.head + 1) % QUEUE_CAPACITY;
+    while (!queue.count && !queue.stopping) pthread_cond_wait(&queue.not_empty, &queue.mutex);
+    if (!queue.count) { pthread_mutex_unlock(&queue.mutex); return -1; }
+    int fd = queue.items[queue.head];
+    queue.head = (queue.head + 1) % queue.capacity;
     queue.count--;
     pthread_mutex_unlock(&queue.mutex);
-    return client_fd;
+    return fd;
 }
 
-static void stop_queue(void) {
+static void stop_workers(void) {
     pthread_mutex_lock(&queue.mutex);
     queue.stopping = true;
     pthread_cond_broadcast(&queue.not_empty);
     pthread_mutex_unlock(&queue.mutex);
 }
 
-static bool send_all(int fd, const char *data, size_t length) {
-    while (length > 0) {
+static bool send_all(int fd, const void *buffer, size_t length) {
+    const char *data = buffer;
+    while (length) {
         ssize_t sent = send(fd, data, length, MSG_NOSIGNAL);
-        if (sent < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return false;
-        }
-        data += (size_t)sent;
-        length -= (size_t)sent;
+        if (sent < 0 && errno == EINTR) continue;
+        if (sent <= 0) return false;
+        data += (size_t)sent; length -= (size_t)sent;
     }
     return true;
 }
 
-static void send_response(int fd, int status, const char *reason,
-                          const char *content_type, const char *body, bool head_only) {
-    char headers[512];
-    size_t body_length = strlen(body);
-    int header_length = snprintf(headers, sizeof(headers),
-        "HTTP/1.1 %d %s\r\n"
-        "Content-Type: %s\r\n"
-        "Content-Length: %zu\r\n"
-        "Connection: close\r\n"
-        "Server: pthread-http/1.0\r\n"
-        "\r\n",
-        status, reason, content_type, body_length);
-
-    if (header_length <= 0 || (size_t)header_length >= sizeof(headers)) {
-        return;
-    }
-    if (send_all(fd, headers, (size_t)header_length) && !head_only) {
-        (void)send_all(fd, body, body_length);
-    }
+static void http_date(char output[30], time_t value) {
+    struct tm tm;
+    gmtime_r(&value, &tm);
+    (void)strftime(output, 30, "%a, %d %b %Y %H:%M:%S GMT", &tm);
 }
 
-static int hex_value(char character) {
-    if (character >= '0' && character <= '9') return character - '0';
-    if (character >= 'a' && character <= 'f') return character - 'a' + 10;
-    if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+static bool send_headers(int fd, int status, const char *reason, const char *type,
+                         off_t length, bool keep_alive, const char *extra) {
+    char date[30], headers[1024];
+    http_date(date, time(NULL));
+    int size = snprintf(headers, sizeof(headers),
+        "HTTP/1.1 %d %s\r\nDate: %s\r\nServer: %s\r\n"
+        "Content-Type: %s\r\nContent-Length: %lld\r\n"
+        "Connection: %s\r\n%s%s\r\n",
+        status, reason, date, SERVER_NAME, type, (long long)length,
+        keep_alive ? "keep-alive" : "close", extra ? extra : "", extra ? "\r\n" : "");
+    return size > 0 && (size_t)size < sizeof(headers) && send_all(fd, headers, (size_t)size);
+}
+
+static bool send_text(int fd, int status, const char *reason, const char *type,
+                      const char *body, bool head, bool keep_alive, const char *extra) {
+    size_t length = strlen(body);
+    return send_headers(fd, status, reason, type, (off_t)length, keep_alive, extra) &&
+           (head || send_all(fd, body, length));
+}
+
+static const char *mime_type(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "application/octet-stream";
+    struct mime { const char *ext, *type; };
+    static const struct mime types[] = {
+        {".html", "text/html; charset=utf-8"}, {".htm", "text/html; charset=utf-8"},
+        {".css", "text/css; charset=utf-8"}, {".js", "text/javascript; charset=utf-8"},
+        {".json", "application/json"}, {".txt", "text/plain; charset=utf-8"},
+        {".xml", "application/xml"}, {".svg", "image/svg+xml"}, {".png", "image/png"},
+        {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"}, {".gif", "image/gif"},
+        {".webp", "image/webp"}, {".ico", "image/x-icon"}, {".pdf", "application/pdf"},
+        {".wasm", "application/wasm"}, {".woff", "font/woff"}, {".woff2", "font/woff2"},
+        {".mp4", "video/mp4"}, {".webm", "video/webm"}, {".mp3", "audio/mpeg"}
+    };
+    for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++)
+        if (!strcasecmp(dot, types[i].ext)) return types[i].type;
+    return "application/octet-stream";
+}
+
+static int hex(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
 
-static bool decode_component(const char *input, size_t length, char *output, size_t capacity) {
+static bool safe_path(const char *target, char *output, size_t capacity) {
+    if (*target != '/') return false;
     size_t used = 0;
-    for (size_t i = 0; i < length; i++) {
-        unsigned char character = (unsigned char)input[i];
-        if (character == '%' && i + 2 < length) {
-            int high = hex_value(input[i + 1]);
-            int low = hex_value(input[i + 2]);
-            if (high < 0 || low < 0) return false;
-            character = (unsigned char)((high << 4) | low);
-            i += 2;
-        } else if (character == '+') {
-            character = ' ';
+    for (size_t i = 1; target[i] && target[i] != '?'; i++) {
+        unsigned char c = (unsigned char)target[i];
+        if (c == '%') {
+            int hi = hex(target[i + 1]), lo = target[i + 2];
+            lo = target[i + 2] ? hex(target[i + 2]) : -1;
+            if (hi < 0 || lo < 0) return false;
+            c = (unsigned char)((hi << 4) | lo); i += 2;
         }
-        if (character == '\0' || used + 1 >= capacity) return false;
-        output[used++] = (char)character;
+        if (!c || c == '\\' || c < 0x20 || used + 1 >= capacity) return false;
+        output[used++] = (char)c;
     }
     output[used] = '\0';
+    char check[MAX_TARGET_BYTES];
+    if (used >= sizeof(check)) return false;
+    memcpy(check, output, used + 1);
+    char *save = NULL;
+    for (char *part = strtok_r(check, "/", &save); part; part = strtok_r(NULL, "/", &save))
+        if (!strcmp(part, "..") || !strcmp(part, ".")) return false;
     return true;
 }
 
-static bool query_parameter(const char *query, const char *key, char *value, size_t capacity) {
-    size_t key_length = strlen(key);
-    while (query != NULL && *query != '\0') {
-        const char *end = strchr(query, '&');
-        size_t pair_length = end == NULL ? strlen(query) : (size_t)(end - query);
-        const char *equals = memchr(query, '=', pair_length);
-        size_t name_length = equals == NULL ? pair_length : (size_t)(equals - query);
-        if (name_length == key_length && strncmp(query, key, key_length) == 0) {
-            const char *encoded = equals == NULL ? query + pair_length : equals + 1;
-            size_t encoded_length = equals == NULL ? 0 : pair_length - name_length - 1;
-            return decode_component(encoded, encoded_length, value, capacity);
-        }
-        query = end == NULL ? NULL : end + 1;
-    }
-    return false;
+static void log_request(const struct sockaddr_in *peer, const http_request *request,
+                        int status, off_t bytes, long elapsed_us) {
+    char address[INET_ADDRSTRLEN] = "-", stamp[64];
+    (void)inet_ntop(AF_INET, &peer->sin_addr, address, sizeof(address));
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    (void)strftime(stamp, sizeof(stamp), "%d/%b/%Y:%H:%M:%S %z", &tm);
+    pthread_mutex_lock(&log_mutex);
+    fprintf(access_log, "%s - - [%s] \"%s %s HTTP/%d.%d\" %d %lld %ldus\n",
+            address, stamp, request->method, request->target, request->major, request->minor,
+            status, (long long)bytes, elapsed_us);
+    fflush(access_log);
+    pthread_mutex_unlock(&log_mutex);
 }
 
-static void html_escape(const char *input, char *output, size_t capacity) {
-    size_t used = 0;
-    while (*input != '\0' && used + 1 < capacity) {
-        const char *replacement = NULL;
-        switch (*input) {
-            case '&': replacement = "&amp;"; break;
-            case '<': replacement = "&lt;"; break;
-            case '>': replacement = "&gt;"; break;
-            case '\"': replacement = "&quot;"; break;
-            case '\'': replacement = "&#39;"; break;
-            default: break;
-        }
-        if (replacement != NULL) {
-            size_t length = strlen(replacement);
-            if (used + length >= capacity) break;
-            memcpy(output + used, replacement, length);
-            used += length;
-        } else {
-            output[used++] = *input;
-        }
-        input++;
+static int parse_request(char *header, http_request *request) {
+    char *line_end = strstr(header, "\r\n");
+    if (!line_end) return 400;
+    *line_end = '\0';
+    char extra;
+    if (sscanf(header, "%15s %4095s HTTP/%d.%d%c", request->method, request->target,
+               &request->major, &request->minor, &extra) != 4) return 400;
+    if (request->major != 1 || (request->minor != 0 && request->minor != 1)) return 505;
+    request->head_only = !strcmp(request->method, "HEAD");
+    request->keep_alive = request->minor == 1;
+    bool host = false, content_length = false, transfer_encoding = false;
+    char *cursor = line_end + 2;
+    while (*cursor) {
+        char *end = strstr(cursor, "\r\n");
+        if (!end) return 400;
+        if (end == cursor) break;
+        *end = '\0';
+        char *colon = strchr(cursor, ':');
+        if (!colon || colon == cursor) return 400;
+        *colon = '\0';
+        for (char *p = cursor; *p; p++)
+            if (!isalnum((unsigned char)*p) && *p != '-') return 400;
+        char *value = trim(colon + 1);
+        if (!strcasecmp(cursor, "Host")) host = *value != '\0';
+        else if (!strcasecmp(cursor, "Connection")) {
+            if (contains_case_insensitive(value, "close")) request->keep_alive = false;
+            else if (contains_case_insensitive(value, "keep-alive")) request->keep_alive = true;
+        } else if (!strcasecmp(cursor, "Content-Length")) {
+            unsigned long length;
+            if (!number(value, 0, 1048576, &length) || length != 0 || content_length) return 400;
+            content_length = true;
+        } else if (!strcasecmp(cursor, "Transfer-Encoding")) transfer_encoding = true;
+        cursor = end + 2;
     }
-    output[used] = '\0';
+    if (request->minor == 1 && !host) return 400;
+    if (transfer_encoding) return 501;
+    if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) return 405;
+    return 0;
 }
 
-static ssize_t read_request_headers(int fd, char *buffer, size_t capacity) {
-    size_t used = 0;
-    while (used + 1 < capacity) {
-        ssize_t received = recv(fd, buffer + used, capacity - used - 1, 0);
-        if (received == 0) {
-            break;
-        }
-        if (received < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return -1;
-        }
-        used += (size_t)received;
-        buffer[used] = '\0';
-        if (strstr(buffer, "\r\n\r\n") != NULL) {
-            return (ssize_t)used;
-        }
+static int serve_request(int fd, http_request *request, bool keep_alive, off_t *bytes) {
+    if (!strcmp(request->target, "/health")) {
+        const char *body = "{\"status\":\"ok\"}\n"; *bytes = (off_t)strlen(body);
+        return send_text(fd, 200, "OK", "application/json", body, request->head_only,
+                         keep_alive, NULL) ? 200 : -1;
     }
-    return (ssize_t)used;
-}
-
-static void handle_connection(int client_fd) {
-    struct timeval timeout = {.tv_sec = 5, .tv_usec = 0};
-    (void)setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    (void)setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-
-    char request[REQUEST_CAPACITY];
-    ssize_t received = read_request_headers(client_fd, request, sizeof(request));
-    if (received <= 0) {
-        return;
-    }
-    request[received] = '\0';
-    if (strstr(request, "\r\n\r\n") == NULL) {
-        send_response(client_fd, 431, "Request Header Fields Too Large",
-                      "text/plain; charset=utf-8", "Request headers are too large.\n", false);
-        return;
-    }
-
-    char method[16];
-    char target[2048];
-    char version[16];
-    if (sscanf(request, "%15s %2047s %15s", method, target, version) != 3 ||
-        (strcmp(version, "HTTP/1.0") != 0 && strcmp(version, "HTTP/1.1") != 0)) {
-        send_response(client_fd, 400, "Bad Request", "text/plain; charset=utf-8",
-                      "Malformed HTTP request.\n", false);
-        return;
-    }
-
-    bool head_only = strcmp(method, "HEAD") == 0;
-    if (strcmp(method, "GET") != 0 && !head_only) {
-        send_response(client_fd, 405, "Method Not Allowed", "text/plain; charset=utf-8",
-                      "Only GET and HEAD are supported.\n", false);
-        return;
-    }
-
-    unsigned long long request_number = atomic_fetch_add(&requests_served, 1) + 1;
-    char *query = strchr(target, '?');
-    if (query != NULL) {
-        *query++ = '\0';
-    }
-
-    if (strcmp(target, "/") == 0) {
-        char name[256] = "visitor";
-        (void)query_parameter(query, "name", name, sizeof(name));
-        char safe_name[1536];
-        html_escape(name, safe_name, sizeof(safe_name));
-        char body[3072];
-        int length = snprintf(body, sizeof(body),
-            "<!doctype html><html><head><meta charset=\"utf-8\">"
-            "<title>pthread HTTP server</title></head><body>"
-            "<h1>It works!</h1><p>Hello, %s!</p>"
-            "<p>This is request #%llu, served dynamically by %ld worker threads.</p>"
-            "<p>Try <a href=\"/?name=Ada\">/?name=Ada</a> or <a href=\"/api/stats\">/api/stats</a>.</p>"
-            "</body></html>\n",
-            safe_name, request_number, configured_threads);
-        if (length < 0 || (size_t)length >= sizeof(body)) {
-            send_response(client_fd, 500, "Internal Server Error", "text/plain; charset=utf-8",
-                          "Could not build response.\n", head_only);
-            return;
-        }
-        send_response(client_fd, 200, "OK", "text/html; charset=utf-8", body, head_only);
-    } else if (strcmp(target, "/health") == 0) {
-        send_response(client_fd, 200, "OK", "application/json", "{\"status\":\"ok\"}\n", head_only);
-    } else if (strcmp(target, "/api/stats") == 0) {
-        time_t now = time(NULL);
-        long long uptime = now >= started_at ? (long long)(now - started_at) : 0;
+    if (!strncmp(request->target, "/api/stats", 10) &&
+        (request->target[10] == '\0' || request->target[10] == '?')) {
         char body[256];
         int length = snprintf(body, sizeof(body),
             "{\"status\":\"ok\",\"uptime_seconds\":%lld,\"requests\":%llu,"
-            "\"active_connections\":%llu,\"worker_threads\":%ld}\n",
-            uptime, request_number, atomic_load(&active_connections), configured_threads);
-        if (length < 0 || (size_t)length >= sizeof(body)) {
-            send_response(client_fd, 500, "Internal Server Error", "text/plain; charset=utf-8",
-                          "Could not build response.\n", head_only);
-            return;
+            "\"active_connections\":%llu,\"worker_threads\":%zu}\n",
+            (long long)(time(NULL) - started_at), atomic_load(&request_count),
+            atomic_load(&active_connections), config.threads);
+        if (length < 0 || (size_t)length >= sizeof(body)) return -1;
+        *bytes = length;
+        return send_text(fd, 200, "OK", "application/json", body, request->head_only,
+                         keep_alive, "Cache-Control: no-store") ? 200 : -1;
+    }
+    char relative[MAX_TARGET_BYTES];
+    if (!safe_path(request->target, relative, sizeof(relative))) {
+        const char *body = "Bad request.\n"; *bytes = (off_t)strlen(body);
+        return send_text(fd, 400, "Bad Request", "text/plain; charset=utf-8", body,
+                         request->head_only, keep_alive, NULL) ? 400 : -1;
+    }
+    if (!*relative || relative[strlen(relative) - 1] == '/') {
+        if (strlen(relative) + strlen("index.html") >= sizeof(relative)) return -1;
+        strcat(relative, "index.html");
+    }
+    int file = open(config.document_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    char path_copy[MAX_TARGET_BYTES];
+    memcpy(path_copy, relative, strlen(relative) + 1);
+    char *save = NULL;
+    for (char *part = strtok_r(path_copy, "/", &save); part && file >= 0;
+         part = strtok_r(NULL, "/", &save)) {
+        bool last = save == NULL || *save == '\0';
+        int flags = O_RDONLY | O_NOFOLLOW | O_CLOEXEC | (last ? 0 : O_DIRECTORY);
+        int next = openat(file, part, flags);
+        close(file);
+        file = next;
+    }
+    struct stat info;
+    if (file < 0 || fstat(file, &info) || !S_ISREG(info.st_mode)) {
+        if (file >= 0) close(file);
+        const char *body = "Not found.\n"; *bytes = (off_t)strlen(body);
+        return send_text(fd, 404, "Not Found", "text/plain; charset=utf-8", body,
+                         request->head_only, keep_alive, NULL) ? 404 : -1;
+    }
+    *bytes = info.st_size;
+    char modified[30], extra[128];
+    http_date(modified, info.st_mtime);
+    (void)snprintf(extra, sizeof(extra), "Last-Modified: %s\r\nX-Content-Type-Options: nosniff", modified);
+    bool ok = send_headers(fd, 200, "OK", mime_type(relative), info.st_size, keep_alive, extra);
+    if (ok && !request->head_only) {
+        off_t offset = 0;
+        while (offset < info.st_size) {
+            ssize_t sent = sendfile(fd, file, &offset, (size_t)(info.st_size - offset));
+            if (sent < 0 && errno == EINTR) continue;
+            if (sent <= 0) { ok = false; break; }
         }
-        send_response(client_fd, 200, "OK", "application/json", body, head_only);
-    } else {
-        send_response(client_fd, 404, "Not Found", "text/plain; charset=utf-8",
-                      "Not found.\n", head_only);
+    }
+    close(file);
+    return ok ? 200 : -1;
+}
+
+static void handle_connection(int fd, const struct sockaddr_in *peer) {
+    struct timeval timeout = {.tv_sec = config.keepalive_timeout};
+    int enabled = 1;
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
+    (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    char buffer[MAX_HEADER_BYTES + 1]; size_t used = 0;
+    for (size_t sequence = 0; sequence < config.keepalive_requests && !stopping; sequence++) {
+        char *end = NULL;
+        while (!(end = used >= 4 ? strstr(buffer, "\r\n\r\n") : NULL)) {
+            if (used == MAX_HEADER_BYTES) {
+                (void)send_text(fd, 431, "Request Header Fields Too Large", "text/plain; charset=utf-8",
+                                "Request headers are too large.\n", false, false, NULL);
+                return;
+            }
+            ssize_t received = recv(fd, buffer + used, MAX_HEADER_BYTES - used, 0);
+            if (received < 0 && errno == EINTR) continue;
+            if (received <= 0) return;
+            used += (size_t)received; buffer[used] = '\0';
+        }
+        size_t header_size = (size_t)(end - buffer) + 4;
+        char header[MAX_HEADER_BYTES + 1];
+        memcpy(header, buffer, header_size); header[header_size] = '\0';
+        memmove(buffer, buffer + header_size, used - header_size);
+        used -= header_size; buffer[used] = '\0';
+        http_request request = {.major = 1, .minor = 1};
+        struct timespec begin, finish; clock_gettime(CLOCK_MONOTONIC, &begin);
+        int error = parse_request(header, &request);
+        bool keep = request.keep_alive && sequence + 1 < config.keepalive_requests;
+        int status; off_t bytes = 0;
+        if (error) {
+            const char *reason = error == 405 ? "Method Not Allowed" : error == 505 ?
+                                 "HTTP Version Not Supported" : error == 501 ? "Not Implemented" : "Bad Request";
+            const char *extra = error == 405 ? "Allow: GET, HEAD" : NULL;
+            const char *body = error == 405 ? "Only GET and HEAD are supported.\n" : "Malformed HTTP request.\n";
+            bytes = (off_t)strlen(body);
+            (void)send_text(fd, error, reason, "text/plain; charset=utf-8", body, false, false, extra);
+            status = error; keep = false;
+        } else {
+            atomic_fetch_add(&request_count, 1);
+            status = serve_request(fd, &request, keep, &bytes);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &finish);
+        long elapsed = (finish.tv_sec - begin.tv_sec) * 1000000L +
+                       (finish.tv_nsec - begin.tv_nsec) / 1000L;
+        if (status > 0) log_request(peer, &request, status, bytes, elapsed);
+        if (status < 0 || !keep) return;
     }
 }
 
 static void *worker_main(void *unused) {
     (void)unused;
     for (;;) {
-        int client_fd = dequeue_connection();
-        if (client_fd < 0) {
-            break;
-        }
+        int fd = dequeue();
+        if (fd < 0) break;
+        struct sockaddr_in peer; socklen_t length = sizeof(peer);
+        memset(&peer, 0, sizeof(peer));
+        (void)getpeername(fd, (struct sockaddr *)&peer, &length);
         atomic_fetch_add(&active_connections, 1);
-        handle_connection(client_fd);
+        handle_connection(fd, &peer);
         atomic_fetch_sub(&active_connections, 1);
-        close(client_fd);
+        close(fd);
     }
     return NULL;
 }
 
-static int create_listener(uint16_t port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) {
-        perror("socket");
-        return -1;
-    }
-
-    int enabled = 1;
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) < 0) {
-        perror("setsockopt");
-        close(fd);
-        return -1;
-    }
-
-    struct sockaddr_in address = {
-        .sin_family = AF_INET,
-        .sin_port = htons(port),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
-    };
-    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("bind");
-        close(fd);
-        return -1;
-    }
-    if (listen(fd, 128) < 0) {
-        perror("listen");
-        close(fd);
-        return -1;
+static int create_listener(void) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0), enabled = 1;
+    if (fd < 0) return -1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
+    struct sockaddr_in address = {.sin_family = AF_INET, .sin_port = htons(config.port),
+                                  .sin_addr.s_addr = htonl(INADDR_ANY)};
+    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) || listen(fd, 512)) {
+        close(fd); return -1;
     }
     return fd;
 }
 
+static void usage(const char *program) {
+    fprintf(stderr, "Usage: %s [-c FILE] [--port N] [--threads N]\n", program);
+}
+
 int main(int argc, char **argv) {
-    long port = DEFAULT_PORT;
-    long thread_count = DEFAULT_THREADS;
-    if (argc > 3 || (argc >= 2 && !parse_positive_number(argv[1], 1, 65535, &port)) ||
-        (argc == 3 && !parse_positive_number(argv[2], 1, 256, &thread_count))) {
-        fprintf(stderr, "Usage: %s [port 1-65535] [threads 1-256]\n", argv[0]);
-        return EXIT_FAILURE;
+    const char *config_path = NULL;
+    for (int i = 1; i < argc; i++) {
+        if ((!strcmp(argv[i], "-c") || !strcmp(argv[i], "--config")) && i + 1 < argc)
+            config_path = argv[++i];
+        else if ((!strcmp(argv[i], "-p") || !strcmp(argv[i], "--port")) && i + 1 < argc) {
+            unsigned long value; if (!number(argv[++i], 1, 65535, &value)) { usage(argv[0]); return 2; }
+            config.port = (uint16_t)value;
+        } else if ((!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) && i + 1 < argc) {
+            unsigned long value; if (!number(argv[++i], 1, MAX_THREADS, &value)) { usage(argv[0]); return 2; }
+            config.threads = (size_t)value;
+        } else { usage(argv[0]); return 2; }
     }
-    configured_threads = thread_count;
+    if (config_path && !load_config(config_path)) return EXIT_FAILURE;
+    /* CLI options intentionally override the configuration file. */
+    for (int i = 1; config_path && i < argc; i++) {
+        if ((!strcmp(argv[i], "-p") || !strcmp(argv[i], "--port")) && i + 1 < argc) {
+            unsigned long value; (void)number(argv[++i], 1, 65535, &value); config.port = (uint16_t)value;
+        } else if ((!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) && i + 1 < argc) {
+            unsigned long value; (void)number(argv[++i], 1, MAX_THREADS, &value); config.threads = (size_t)value;
+        } else if ((!strcmp(argv[i], "-c") || !strcmp(argv[i], "--config")) && i + 1 < argc) i++;
+    }
+    struct stat root_info;
+    if (stat(config.document_root, &root_info) || !S_ISDIR(root_info.st_mode)) {
+        fprintf(stderr, "document_root is not a directory: %s\n", config.document_root); return EXIT_FAILURE;
+    }
+    access_log = !strcmp(config.log_file, "-") ? stdout : fopen(config.log_file, "a");
+    if (!access_log) { perror(config.log_file); return EXIT_FAILURE; }
+    if (!queue_init()) { perror("queue_init"); return EXIT_FAILURE; }
     started_at = time(NULL);
-
-    struct sigaction action = {0};
-    action.sa_handler = handle_signal;
-    sigemptyset(&action.sa_mask);
-    if (sigaction(SIGINT, &action, NULL) < 0 || sigaction(SIGTERM, &action, NULL) < 0) {
-        perror("sigaction");
-        return EXIT_FAILURE;
-    }
+    struct sigaction action = {0}; action.sa_handler = on_signal; sigemptyset(&action.sa_mask);
+    (void)sigaction(SIGINT, &action, NULL); (void)sigaction(SIGTERM, &action, NULL);
     signal(SIGPIPE, SIG_IGN);
-
-    sigset_t shutdown_signals;
-    sigemptyset(&shutdown_signals);
-    sigaddset(&shutdown_signals, SIGINT);
-    sigaddset(&shutdown_signals, SIGTERM);
-    int mask_error = pthread_sigmask(SIG_BLOCK, &shutdown_signals, NULL);
-    if (mask_error != 0) {
-        fprintf(stderr, "pthread_sigmask: %s\n", strerror(mask_error));
-        return EXIT_FAILURE;
+    pthread_t *workers = calloc(config.threads, sizeof(*workers));
+    if (!workers) { perror("calloc"); return EXIT_FAILURE; }
+    size_t started = 0;
+    for (; started < config.threads; started++) {
+        int error = pthread_create(&workers[started], NULL, worker_main, NULL);
+        if (error) { fprintf(stderr, "pthread_create: %s\n", strerror(error)); break; }
     }
-
-    pthread_t *workers = calloc((size_t)thread_count, sizeof(*workers));
-    if (workers == NULL) {
-        perror("calloc");
-        return EXIT_FAILURE;
-    }
-
-    long workers_started = 0;
-    for (; workers_started < thread_count; workers_started++) {
-        int error = pthread_create(&workers[workers_started], NULL, worker_main, NULL);
-        if (error != 0) {
-            fprintf(stderr, "pthread_create: %s\n", strerror(error));
-            stop_queue();
-            for (long i = 0; i < workers_started; i++) {
-                pthread_join(workers[i], NULL);
+    if (started != config.threads) { stop_workers(); }
+    else listener = create_listener();
+    if (listener < 0 && started == config.threads) { perror("listen"); stop_workers(); }
+    if (listener >= 0) {
+        fprintf(stderr, "Listening on 0.0.0.0:%u (%zu workers, root %s)\n",
+                config.port, config.threads, config.document_root);
+        while (!stopping) {
+            int fd = accept((int)listener, NULL, NULL);
+            if (fd < 0) { if (errno == EINTR) continue; if (stopping) break; perror("accept"); continue; }
+            if (!enqueue(fd)) {
+                (void)send_text(fd, 503, "Service Unavailable", "text/plain; charset=utf-8",
+                                "Server is busy.\n", false, false, "Retry-After: 1");
+                close(fd);
             }
-            free(workers);
-            return EXIT_FAILURE;
         }
+        if (listener >= 0) close((int)listener);
+        listener = -1; stop_workers();
     }
-
-    listen_fd = create_listener((uint16_t)port);
-    if (listen_fd < 0) {
-        stop_queue();
-        for (long i = 0; i < workers_started; i++) {
-            pthread_join(workers[i], NULL);
-        }
-        free(workers);
-        return EXIT_FAILURE;
-    }
-
-    printf("Listening on http://0.0.0.0:%ld with %ld worker threads\n", port, thread_count);
-    fflush(stdout);
-
-    mask_error = pthread_sigmask(SIG_UNBLOCK, &shutdown_signals, NULL);
-    if (mask_error != 0) {
-        fprintf(stderr, "pthread_sigmask: %s\n", strerror(mask_error));
-        close((int)listen_fd);
-        listen_fd = -1;
-        stop_queue();
-        for (long i = 0; i < workers_started; i++) {
-            pthread_join(workers[i], NULL);
-        }
-        free(workers);
-        return EXIT_FAILURE;
-    }
-
-    while (!stop_requested) {
-        int client_fd = accept((int)listen_fd, NULL, NULL);
-        if (client_fd < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            if (stop_requested || errno == EBADF || errno == EINVAL) {
-                break;
-            }
-            perror("accept");
-            continue;
-        }
-        if (!enqueue_connection(client_fd)) {
-            send_response(client_fd, 503, "Service Unavailable", "text/plain; charset=utf-8",
-                          "Server is busy.\n", false);
-            close(client_fd);
-        }
-    }
-
-    if (listen_fd >= 0) {
-        close((int)listen_fd);
-        listen_fd = -1;
-    }
-    stop_queue();
-    for (long i = 0; i < workers_started; i++) {
-        pthread_join(workers[i], NULL);
-    }
-    free(workers);
-    pthread_cond_destroy(&queue.not_empty);
-    pthread_mutex_destroy(&queue.mutex);
-    puts("Server stopped.");
-    return EXIT_SUCCESS;
+    for (size_t i = 0; i < started; i++) pthread_join(workers[i], NULL);
+    free(workers); free(queue.items);
+    pthread_cond_destroy(&queue.not_empty); pthread_mutex_destroy(&queue.mutex);
+    if (access_log != stdout) fclose(access_log);
+    return started == config.threads ? EXIT_SUCCESS : EXIT_FAILURE;
 }

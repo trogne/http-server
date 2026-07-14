@@ -101,6 +101,14 @@ concurrent requests:
 make test
 ```
 
+## Deploy on Render
+
+The included `render.yaml` deploys the Docker image as a Render web service.
+Create a Render Blueprint from this repository to publish it. The free plan uses
+ephemeral storage, so SQLite records can be lost on a restart or redeploy. For
+durable records, use a paid service and attach a persistent disk at
+`/srv/http/data`.
+
 From Windows, either use Docker or an installed WSL distribution:
 
 ```powershell

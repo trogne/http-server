@@ -7,7 +7,7 @@ COPY tests/ tests/
 COPY scripts/ scripts/
 COPY public/ public/
 COPY templates/ templates/
-COPY server.conf ./
+COPY server.conf render.conf ./
 RUN make
 
 FROM build AS test
@@ -30,8 +30,10 @@ COPY --from=build /src/tcp_client /usr/local/bin/tcp_client
 COPY --from=build /src/public /srv/http/public
 COPY --from=build /src/templates /srv/http/templates
 COPY --from=build /src/server.conf /etc/dense-http.conf
+COPY --from=build /src/render.conf /etc/dense-http-render.conf
+RUN mkdir -p /srv/http/data && chown server:server /srv/http/data
 WORKDIR /srv/http
 USER server
-EXPOSE 8080
+EXPOSE 10000
 ENTRYPOINT ["/usr/local/bin/http_server"]
-CMD ["--config", "/etc/dense-http.conf"]
+CMD ["--config", "/etc/dense-http-render.conf"]

@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: dense-http-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeployTrigger: commit

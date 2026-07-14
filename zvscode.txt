@@ -1,4 +1,4 @@
-From WSL shell:
+From WSL shell :
 cd /home/trogne/projects/http-server && code .
 
 From Windows but explicitly using the WSL URI:

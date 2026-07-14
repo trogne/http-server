@@ -60,6 +60,7 @@ typedef struct {
     bool head_only;
     size_t content_length;
     char content_type[128];
+    char authorization[512];
     char *body;
 } http_request;
 
@@ -79,6 +80,7 @@ static FILE *access_log;
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static sqlite3 *database;
 static pthread_mutex_t database_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char api_token[256];
 
 static void on_signal(int signum) {
     (void)signum;
@@ -349,6 +351,9 @@ static int parse_request(char *header, http_request *request) {
         } else if (!strcasecmp(cursor, "Content-Type")) {
             if (strlen(value) >= sizeof(request->content_type)) return 400;
             memcpy(request->content_type, value, strlen(value) + 1);
+        } else if (!strcasecmp(cursor, "Authorization")) {
+            if (strlen(value) >= sizeof(request->authorization) || request->authorization[0]) return 400;
+            memcpy(request->authorization, value, strlen(value) + 1);
         } else if (!strcasecmp(cursor, "Transfer-Encoding")) transfer_encoding = true;
         cursor = end + 2;
     }
@@ -574,6 +579,36 @@ static bool send_json(int fd, int status, const char *reason, const char *body, 
     return send_text(fd, status, reason, "application/json", body, head, keep_alive, extra);
 }
 
+static bool secure_equals(const char *left, const char *right) {
+    size_t left_length = strlen(left), right_length = strlen(right);
+    size_t length = left_length > right_length ? left_length : right_length;
+    unsigned char difference = (unsigned char)(left_length ^ right_length);
+    for (size_t i = 0; i < length; i++) {
+        unsigned char a = i < left_length ? (unsigned char)left[i] : 0;
+        unsigned char b = i < right_length ? (unsigned char)right[i] : 0;
+        difference |= a ^ b;
+    }
+    return difference == 0;
+}
+
+static int require_user_write_auth(int fd, const http_request *request, bool keep_alive,
+                                   off_t *bytes) {
+    if (!api_token[0]) {
+        const char *body = "{\"error\":\"user writes are disabled until DENSE_HTTP_API_TOKEN is configured\"}\n";
+        *bytes = (off_t)strlen(body);
+        return send_json(fd, 503, "Service Unavailable", body, false, keep_alive, NULL) ? 503 : -1;
+    }
+    const char prefix[] = "Bearer ";
+    if (strncmp(request->authorization, prefix, sizeof(prefix) - 1) ||
+        !secure_equals(request->authorization + sizeof(prefix) - 1, api_token)) {
+        const char *body = "{\"error\":\"valid bearer token required\"}\n";
+        *bytes = (off_t)strlen(body);
+        return send_json(fd, 401, "Unauthorized", body, false, keep_alive,
+                         "WWW-Authenticate: Bearer") ? 401 : -1;
+    }
+    return 0;
+}
+
 static bool decode_query_component(const char *encoded, size_t length, char *out, size_t capacity) {
     size_t used = 0;
     for (size_t i = 0; i < length; i++) {
@@ -636,6 +671,8 @@ static int users_route(int fd, http_request *request, bool keep_alive, off_t *by
 
     if (!strcmp(route, "/users") || !strcmp(route, "/users/")) {
         if (!strcmp(request->method, "POST")) {
+            int auth_status = require_user_write_auth(fd, request, keep_alive, bytes);
+            if (auth_status) return auth_status;
             char name[256] = {0}, email[256] = {0};
             if (!request->body || !parse_user_payload(request->body, name, sizeof(name),
                                                       email, sizeof(email)) ||
@@ -812,6 +849,8 @@ static int users_route(int fd, http_request *request, bool keep_alive, off_t *by
         return send_json(fd, 404, "Not Found", body, false, keep_alive, NULL) ? 404 : -1;
     }
     if (!strcmp(request->method, "PUT")) {
+        int auth_status = require_user_write_auth(fd, request, keep_alive, bytes);
+        if (auth_status) return auth_status;
         char name[256] = {0}, email[256] = {0};
         if (!request->body || !parse_user_payload(request->body, name, sizeof(name),
                                                   email, sizeof(email)) ||
@@ -848,6 +887,8 @@ static int users_route(int fd, http_request *request, bool keep_alive, off_t *by
         return sent ? 200 : -1;
     }
     if (!strcmp(request->method, "DELETE")) {
+        int auth_status = require_user_write_auth(fd, request, keep_alive, bytes);
+        if (auth_status) return auth_status;
         pthread_mutex_lock(&database_mutex);
         sqlite3_stmt *statement = NULL;
         bool ok = sqlite3_prepare_v2(database, "DELETE FROM users WHERE id = ?", -1, &statement, NULL) == SQLITE_OK &&
@@ -1132,6 +1173,16 @@ int main(int argc, char **argv) {
         } else { usage(argv[0]); return 2; }
     }
     if (config_path && !load_config(config_path)) return EXIT_FAILURE;
+    const char *token = getenv("DENSE_HTTP_API_TOKEN");
+    if (token) {
+        size_t length = strlen(token);
+        if (length < 16 || length >= sizeof(api_token)) {
+            fprintf(stderr, "DENSE_HTTP_API_TOKEN must contain 16 to %zu characters\n",
+                    sizeof(api_token) - 1);
+            return EXIT_FAILURE;
+        }
+        memcpy(api_token, token, length + 1);
+    }
     /* CLI options intentionally override the configuration file. */
     for (int i = 1; config_path && i < argc; i++) {
         if ((!strcmp(argv[i], "-p") || !strcmp(argv[i], "--port")) && i + 1 < argc) {

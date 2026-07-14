@@ -54,6 +54,12 @@ The home page provides a browser UI for the Users API. Its JSON endpoints are
 requests accept `page`, `limit`, `search`, `sort` (`id`, `name`, or `email`),
 and `order` (`asc` or `desc`) query parameters.
 
+User reads are public. `POST`, `PUT`, and `DELETE` require an API token supplied
+as `Authorization: Bearer TOKEN`. Set a secret of at least 16 characters in the
+`DENSE_HTTP_API_TOKEN` environment variable. If it is unset, user writes fail
+closed with `503 Service Unavailable`. The browser UI keeps the entered token in
+memory only; it is not committed or saved to local storage.
+
 With Docker Desktop on Windows:
 
 ```powershell

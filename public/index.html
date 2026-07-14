@@ -20,6 +20,10 @@
       <span id="status-text">Checking server…</span>
       <span id="user-count">Users: 0</span>
     </div>
+    <label>API write token
+      <input id="api-token" type="password" autocomplete="current-password"
+             placeholder="Required to create, edit, or delete users">
+    </label>
     <form id="user-form">
       <input type="hidden" name="id" value="">
       <label>Name
@@ -68,6 +72,7 @@
     const statusText = document.getElementById('status-text');
     const userCount = document.getElementById('user-count');
     const loading = document.getElementById('loading');
+    const apiTokenInput = document.getElementById('api-token');
     let currentPage = 1;
     let currentSearch = '';
     let currentSort = 'id';
@@ -82,6 +87,14 @@
 
     function updateOrderButton() {
       orderButton.textContent = `Order: ${currentOrder === 'asc' ? 'Asc' : 'Desc'}`;
+    }
+
+    function writeHeaders(includeJson = false) {
+      const headers = {};
+      if (includeJson) headers['Content-Type'] = 'application/json';
+      const token = apiTokenInput.value.trim();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      return headers;
     }
 
     async function loadUsers() {
@@ -175,7 +188,10 @@
     }
 
     async function deleteUser(id) {
-      const response = await fetch(`/users/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/users/${id}`, {
+        method: 'DELETE',
+        headers: writeHeaders(),
+      });
       const data = await response.json();
       if (response.ok) {
         setMessage('User deleted.', 'success');
@@ -245,7 +261,7 @@
       const body = { name: payload.name, email: payload.email };
       const response = await fetch(id ? `/users/${id}` : '/users', {
         method: id ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: writeHeaders(true),
         body: JSON.stringify(body),
       });
       const data = await response.json();

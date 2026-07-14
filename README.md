@@ -23,6 +23,7 @@ the resource limits appropriate to your environment.
 - Dynamic `GET`, `HEAD`, and form `POST` routes
 - `{{value}}` escaped and `{{{trusted_html}}}` raw template substitutions
 - SQLite-backed notes example at `/notes`
+- SQLite-backed JSON Users API at `/users`, with CRUD, search, sorting, and pagination
 - A raw TCP protocol client (`tcp_client`)
 
 ## Build and run
@@ -47,6 +48,11 @@ curl or an HTTP client library:
 ```sh
 ./tcp_client 127.0.0.1 8080 /notes
 ```
+
+The home page provides a browser UI for the Users API. Its JSON endpoints are
+`GET /users`, `POST /users`, and `GET`, `PUT`, or `DELETE /users/{id}`. List
+requests accept `page`, `limit`, `search`, `sort` (`id`, `name`, or `email`),
+and `order` (`asc` or `desc`) query parameters.
 
 With Docker Desktop on Windows:
 

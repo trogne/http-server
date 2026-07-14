@@ -46,6 +46,19 @@ def raw_request(port, payload):
         return sock.recv(4096)
 
 
+def json_request(port, method, path, payload=None):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+    headers = {}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        headers["Content-Length"] = str(len(payload))
+    connection.request(method, path, body=payload, headers=headers)
+    response = connection.getresponse()
+    result = response.status, dict(response.getheaders()), response.read()
+    connection.close()
+    return result
+
+
 def main():
     binary = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "./http_server")
     port = free_port()
@@ -88,7 +101,9 @@ def main():
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
             connection.request("GET", "/health")
             first = connection.getresponse()
-            assert first.status == 200 and first.read() == b'{"status":"ok"}\n'
+            health = json.loads(first.read())
+            assert first.status == 200 and health["status"] == "ok"
+            assert isinstance(health["uptime_seconds"], int)
             socket_id = connection.sock.fileno()
             connection.request("GET", "/api/stats")
             second = connection.getresponse()
@@ -119,9 +134,68 @@ def main():
                 b"HTTP/1.1 400"
             )
 
+            status, headers, body = json_request(port, "POST", "/users", b'{"name":"Ada","email":"ada@example.com"}')
+            assert status == 201 and headers["Content-Type"].startswith("application/json")
+            created = json.loads(body)
+            assert created["name"] == "Ada" and created["email"] == "ada@example.com"
+            user_id = created["id"]
+
+            status, _, body = json_request(port, "GET", f"/users/{user_id}")
+            assert status == 200 and json.loads(body)["id"] == user_id
+
+            status, _, body = json_request(port, "POST", "/users", b'{"name":"Grace","email":"grace@example.com"}')
+            assert status == 201
+
+            status, _, body = json_request(port, "GET", "/users")
+            payload = json.loads(body)
+            assert status == 200 and any(item["id"] == user_id for item in payload["users"])
+
+            status, _, body = json_request(port, "GET", "/users?sort=name&order=desc&limit=10")
+            payload = json.loads(body)
+            assert status == 200 and payload["users"][0]["name"] == "Grace"
+
+            status, _, body = json_request(port, "GET", "/users?page=1&limit=1")
+            payload = json.loads(body)
+            assert status == 200 and payload["page"] == 1 and payload["limit"] == 1 and len(payload["users"]) <= 1
+
+            status, _, body = json_request(port, "GET", "/users?search=ada")
+            payload = json.loads(body)
+            assert status == 200 and any(item["email"] == "ada@example.com" for item in payload["users"])
+
+            status, _, body = json_request(port, "POST", "/users", b'{"name":"Ada Lovelace","email":"ada.l@example.com"}')
+            assert status == 201
+            status, _, body = json_request(port, "GET", "/users?search=Ada%20Lovelace")
+            assert status == 200 and any(item["name"] == "Ada Lovelace" for item in json.loads(body)["users"])
+
+            status, _, body = json_request(port, "PUT", f"/users/{user_id}", b'{"name":"Grace","email":"grace@example.com"}')
+            assert status == 200 and json.loads(body)["name"] == "Grace"
+
+            status, _, body = json_request(port, "DELETE", f"/users/{user_id}")
+            assert status == 200 and json.loads(body)["deleted"] is True
+
+            status, _, body = json_request(port, "GET", f"/users/{user_id}")
+            assert status == 404 and b"not found" in body.lower()
+
+            assert json_request(port, "PUT", "/users/2147483647", b'{"name":"Nobody","email":"nobody@example.com"}')[0] == 404
+            assert json_request(port, "DELETE", "/users/2147483647")[0] == 404
+            assert request(port, method="DELETE", path="/index.html")[0] == 405
+            assert request(port, method="DELETE", path="/notes")[0] == 405
+            assert json_request(port, "PUT", "/health", b'{}')[0] == 405
+            assert request(port, method="DELETE", path="/api/stats")[0] == 405
+
+            status, _, body = json_request(port, "POST", "/users", b'{bad json}')
+            assert status == 400
+
+            status, _, body = json_request(port, "POST", "/users", b'{"name":"","email":"ada@example.com"}')
+            assert status == 400 and b"invalid" in body.lower()
+
+            status, _, body = json_request(port, "POST", "/users", b'{"name":"Ada","email":"not-an-email"}')
+            assert status == 400 and b"invalid" in body.lower()
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
                 results = list(pool.map(lambda _: request(port, path="/health"), range(200)))
-            assert all(s == 200 and b == b'{"status":"ok"}\n' for s, _, b in results)
+            assert all(s == 200 for s, _, _ in results)
+            assert all(b.startswith(b'{"status":"ok"') for _, _, b in results)
 
             time.sleep(0.1)
             lines = log.read_text(encoding="utf-8").splitlines()

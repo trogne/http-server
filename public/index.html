@@ -3,13 +3,248 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>dense-http</title>
+  <title>Users API Demo</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <main>
-    <h1>dense-http is running</h1>
-    <p>A small, multithreaded HTTP/1.1 static file server.</p>
+    <div class="hero">
+      <h1>Users API Demo</h1>
+      <p class="hero-copy">A tiny REST demo for creating, editing, searching, and paginating users.</p>
+    </div>
+    <div class="about-card">
+      <strong>What you can do</strong>
+      <span>Create records, update them inline, delete them, and browse the results page by page.</span>
+    </div>
+    <div id="status-panel" class="status-panel">
+      <span id="status-text">Checking server…</span>
+      <span id="user-count">Users: 0</span>
+    </div>
+    <form id="user-form">
+      <input type="hidden" name="id" value="">
+      <label>Name
+        <input name="name" required>
+      </label>
+      <label>Email
+        <input name="email" type="email" required>
+      </label>
+      <button type="submit">Create user</button>
+    </form>
+    <p id="message" role="status"></p>
+    <div id="loading" class="loading" aria-live="polite">Loading…</div>
+    <h2>Users</h2>
+    <div class="toolbar">
+      <input id="search" placeholder="Search by name or email">
+      <select id="sort-select">
+        <option value="id">Sort by ID</option>
+        <option value="name">Sort by name</option>
+        <option value="email">Sort by email</option>
+      </select>
+      <button id="order-button" type="button">Order: Asc</button>
+      <button id="search-button" type="button">Search</button>
+    </div>
+    <div class="toolbar">
+      <button id="prev-page" type="button">Previous</button>
+      <span id="page-info">Page 1</span>
+      <button id="next-page" type="button">Next</button>
+      <button id="refresh-button" type="button">Refresh</button>
+      <button id="reset-button" type="button">Reset form</button>
+    </div>
+    <ul id="users"></ul>
   </main>
+  <script>
+    const form = document.getElementById('user-form');
+    const message = document.getElementById('message');
+    const usersList = document.getElementById('users');
+    const searchInput = document.getElementById('search');
+    const searchButton = document.getElementById('search-button');
+    const sortSelect = document.getElementById('sort-select');
+    const orderButton = document.getElementById('order-button');
+    const prevButton = document.getElementById('prev-page');
+    const nextButton = document.getElementById('next-page');
+    const refreshButton = document.getElementById('refresh-button');
+    const resetButton = document.getElementById('reset-button');
+    const pageInfo = document.getElementById('page-info');
+    const statusText = document.getElementById('status-text');
+    const userCount = document.getElementById('user-count');
+    const loading = document.getElementById('loading');
+    let currentPage = 1;
+    let currentSearch = '';
+    let currentSort = 'id';
+    let currentOrder = 'asc';
+
+    function updateOrderButton() {
+      orderButton.textContent = `Order: ${currentOrder === 'asc' ? 'Asc' : 'Desc'}`;
+    }
+
+    async function loadUsers() {
+      loading.style.display = 'block';
+      const params = new URLSearchParams({ page: currentPage, limit: 5, sort: currentSort, order: currentOrder });
+      if (currentSearch) params.set('search', currentSearch);
+      const response = await fetch(`/users?${params.toString()}`);
+      const data = await response.json();
+      usersList.innerHTML = '';
+      if (!data.users.length) {
+        const emptyItem = document.createElement('li');
+        emptyItem.className = 'empty-state';
+        emptyItem.textContent = 'No users found.';
+        usersList.appendChild(emptyItem);
+      }
+      for (const user of data.users) {
+        const item = document.createElement('li');
+        const label = document.createElement('span');
+        label.textContent = `${user.name} <${user.email}>`;
+        const editButton = document.createElement('button');
+        editButton.textContent = 'Edit';
+        editButton.type = 'button';
+        editButton.onclick = () => fillForm(user);
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = 'Delete';
+        deleteButton.type = 'button';
+        deleteButton.onclick = () => deleteUser(user.id);
+        item.appendChild(label);
+        item.appendChild(editButton);
+        item.appendChild(deleteButton);
+        usersList.appendChild(item);
+      }
+      pageInfo.textContent = `Page ${data.page} · Total ${data.total}`;
+      prevButton.disabled = data.page <= 1;
+      nextButton.disabled = data.page * data.limit >= data.total;
+      userCount.textContent = `Users: ${data.total}`;
+      loading.style.display = 'none';
+    }
+
+    async function refreshStatus() {
+      loading.style.display = 'block';
+      try {
+        const [healthResponse, statsResponse] = await Promise.all([fetch('/health'), fetch('/api/stats')]);
+        const health = await healthResponse.json();
+        const stats = await statsResponse.json();
+        statusText.textContent = healthResponse.ok
+          ? `API OK · ${health.uptime_seconds}s · ${stats.requests} req`
+          : 'API unavailable';
+      } catch (error) {
+        statusText.textContent = 'API unavailable';
+      }
+      loading.style.display = 'none';
+    }
+
+    function setMessage(text, type = 'info') {
+      message.textContent = text;
+      message.className = `message ${type}`;
+    }
+
+    function clearMessage() {
+      message.textContent = '';
+      message.className = 'message';
+    }
+
+    function fillForm(user) {
+      form.elements.id.value = user.id;
+      form.elements.name.value = user.name;
+      form.elements.email.value = user.email;
+      form.querySelector('button').textContent = 'Update user';
+      setMessage(`Editing ${user.name}.`, 'info');
+    }
+
+    function resetForm() {
+      form.reset();
+      form.elements.id.value = '';
+      form.querySelector('button').textContent = 'Create user';
+      clearMessage();
+    }
+
+    async function deleteUser(id) {
+      const response = await fetch(`/users/${id}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (response.ok) {
+        setMessage('User deleted.', 'success');
+        setTimeout(clearMessage, 1800);
+        await loadUsers();
+      } else {
+        setMessage(data.error || 'Unable to delete user.', 'error');
+        setTimeout(clearMessage, 1800);
+      }
+    }
+
+    async function runSearch() {
+      currentSearch = searchInput.value.trim();
+      currentPage = 1;
+      await loadUsers();
+    }
+
+    searchButton.addEventListener('click', runSearch);
+    sortSelect.addEventListener('change', async () => {
+      currentSort = sortSelect.value;
+      currentPage = 1;
+      await loadUsers();
+    });
+    orderButton.addEventListener('click', async () => {
+      currentOrder = currentOrder === 'asc' ? 'desc' : 'asc';
+      updateOrderButton();
+      currentPage = 1;
+      await loadUsers();
+    });
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        runSearch();
+      }
+    });
+
+    prevButton.addEventListener('click', async () => {
+      if (currentPage > 1) {
+        currentPage -= 1;
+        await loadUsers();
+      }
+    });
+
+    nextButton.addEventListener('click', async () => {
+      currentPage += 1;
+      await loadUsers();
+    });
+
+    refreshButton.addEventListener('click', async () => {
+      await Promise.all([loadUsers(), refreshStatus()]);
+    });
+
+    resetButton.addEventListener('click', () => {
+      resetForm();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        resetForm();
+      }
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = Object.fromEntries(new FormData(form).entries());
+      const id = payload.id;
+      const body = { name: payload.name, email: payload.email };
+      const response = await fetch(id ? `/users/${id}` : '/users', {
+        method: id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setMessage(id ? 'User updated.' : 'User created successfully.', 'success');
+        resetForm();
+        setTimeout(clearMessage, 1800);
+        await loadUsers();
+      } else {
+        setMessage(data.error || 'Unable to save user.', 'error');
+        setTimeout(clearMessage, 1800);
+      }
+    });
+
+    updateOrderButton();
+    loadUsers().catch(() => {
+      setMessage('Unable to load users.', 'error');
+    });
+    refreshStatus();
+  </script>
 </body>
 </html>

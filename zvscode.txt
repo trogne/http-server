@@ -5,3 +5,4 @@ From Windows but explicitly using the WSL URI:
 
 code --folder-uri vscode-remote://wsl+Ubuntu/home/trogne/projects/http-server
 
+./http_server --config server.conf

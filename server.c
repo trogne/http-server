@@ -355,8 +355,10 @@ static int parse_request(char *header, http_request *request) {
     if (request->minor == 1 && !host) return 400;
     if (transfer_encoding) return 501;
     if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD") &&
-        strcmp(request->method, "POST")) return 405;
-    if (!strcmp(request->method, "POST") && !content_length) return 411;
+        strcmp(request->method, "POST") && strcmp(request->method, "PUT") &&
+        strcmp(request->method, "DELETE")) return 405;
+    if ((!strcmp(request->method, "POST") || !strcmp(request->method, "PUT")) &&
+        !content_length) return 411;
     return 0;
 }
 
@@ -451,6 +453,423 @@ static bool form_value(const char *body, const char *key, char *out, size_t capa
     return false;
 }
 
+static bool append_json_string(string_buffer *out, const char *text) {
+    if (!append_bytes(out, "\"", 1)) return false;
+    for (const unsigned char *cursor = (const unsigned char *)text; *cursor; cursor++) {
+        const char *replacement = NULL;
+        switch (*cursor) {
+            case '\\': replacement = "\\\\"; break;
+            case '"': replacement = "\\\""; break;
+            case '\n': replacement = "\\n"; break;
+            case '\r': replacement = "\\r"; break;
+            case '\t': replacement = "\\t"; break;
+            case '\b': replacement = "\\b"; break;
+            case '\f': replacement = "\\f"; break;
+            default: break;
+        }
+        if (replacement) {
+            if (!append_bytes(out, replacement, strlen(replacement))) return false;
+        } else if (*cursor < 0x20) {
+            char escaped[7];
+            int length = snprintf(escaped, sizeof(escaped), "\\u%04x", *cursor);
+            if (length != 6 || !append_bytes(out, escaped, 6)) return false;
+        } else if (!append_bytes(out, (const char *)cursor, 1)) {
+            return false;
+        }
+    }
+    return append_bytes(out, "\"", 1);
+}
+
+static bool append_user_json(string_buffer *out, int id, const char *name, const char *email) {
+    char text[64];
+    int length = snprintf(text, sizeof(text), "%d", id);
+    if (length < 0 || (size_t)length >= sizeof(text)) return false;
+    return append_bytes(out, "{\"id\":", 6) && append_bytes(out, text, (size_t)length) &&
+           append_bytes(out, ",\"name\":", 8) && append_json_string(out, name) &&
+           append_bytes(out, ",\"email\":", 9) && append_json_string(out, email) &&
+           append_bytes(out, "}", 1);
+}
+
+static bool parse_json_string(const char **cursor, char *out, size_t capacity) {
+    if (**cursor != '"') return false;
+    (*cursor)++;
+    size_t used = 0;
+    while (**cursor && **cursor != '"') {
+        char current = *(*cursor)++;
+        if ((unsigned char)current < 0x20) return false;
+        if (current == '\\') {
+            if (!**cursor) return false;
+            char escaped = *(*cursor)++;
+            switch (escaped) {
+                case '"': current = '"'; break;
+                case '\\': current = '\\'; break;
+                case '/': current = '/'; break;
+                case 'b': current = '\b'; break;
+                case 'f': current = '\f'; break;
+                case 'n': current = '\n'; break;
+                case 'r': current = '\r'; break;
+                case 't': current = '\t'; break;
+                default: return false;
+            }
+        }
+        if (used + 1 >= capacity) return false;
+        out[used++] = current;
+    }
+    if (**cursor != '"') return false;
+    (*cursor)++;
+    out[used] = '\0';
+    return true;
+}
+
+static bool is_valid_email(const char *email) {
+    const char *at = strchr(email, '@');
+    if (!at || at == email) return false;
+    const char *dot = strrchr(email, '.');
+    if (!dot || dot <= at + 1 || dot[1] == '\0') return false;
+    for (const char *cursor = email; *cursor; cursor++) {
+        unsigned char c = (unsigned char)*cursor;
+        if (isalnum(c) || c == '.' || c == '_' || c == '-' || c == '@') continue;
+        return false;
+    }
+    return true;
+}
+
+static bool parse_user_payload(const char *body, char *name, size_t name_capacity,
+                               char *email, size_t email_capacity) {
+    const char *cursor = body;
+    while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+    if (*cursor != '{') return false;
+    cursor++;
+    bool saw_name = false, saw_email = false;
+    for (;;) {
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (*cursor == '}') { cursor++; break; }
+        char key[64];
+        if (!parse_json_string(&cursor, key, sizeof(key))) return false;
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (*cursor != ':') return false;
+        cursor++;
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (!strcmp(key, "name")) {
+            if (!parse_json_string(&cursor, name, name_capacity)) return false;
+            saw_name = true;
+        } else if (!strcmp(key, "email")) {
+            if (!parse_json_string(&cursor, email, email_capacity)) return false;
+            saw_email = true;
+        } else {
+            char ignored[1024];
+            if (!parse_json_string(&cursor, ignored, sizeof(ignored))) return false;
+        }
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (*cursor == ',') { cursor++; continue; }
+        if (*cursor == '}') { cursor++; break; }
+        return false;
+    }
+    while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+    return saw_name && saw_email && *cursor == '\0';
+}
+
+static bool send_json(int fd, int status, const char *reason, const char *body, bool head,
+                      bool keep_alive, const char *extra) {
+    return send_text(fd, status, reason, "application/json", body, head, keep_alive, extra);
+}
+
+static bool decode_query_component(const char *encoded, size_t length, char *out, size_t capacity) {
+    size_t used = 0;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)encoded[i];
+        if (c == '+') {
+            c = ' ';
+        } else if (c == '%') {
+            if (i + 2 >= length) return false;
+            int hi = hex(encoded[i + 1]), lo = hex(encoded[i + 2]);
+            if (hi < 0 || lo < 0) return false;
+            c = (unsigned char)((hi << 4) | lo);
+            i += 2;
+        }
+        if (!c || used + 1 >= capacity) return false;
+        out[used++] = (char)c;
+    }
+    out[used] = '\0';
+    return true;
+}
+
+static bool parse_query_value(const char *query, const char *key, char *out, size_t capacity) {
+    size_t key_length = strlen(key);
+    if (!query) return false;
+    for (const char *cursor = query; cursor && *cursor; ) {
+        const char *separator = strchr(cursor, '&');
+        size_t length = separator ? (size_t)(separator - cursor) : strlen(cursor);
+        if (length > key_length + 1 && !strncmp(cursor, key, key_length) && cursor[key_length] == '=') {
+            size_t value_length = length - key_length - 1;
+            return decode_query_component(cursor + key_length + 1, value_length, out, capacity);
+        }
+        if (!separator) break;
+        cursor = separator + 1;
+    }
+    return false;
+}
+
+static unsigned long parse_positive_number(const char *text, unsigned long fallback) {
+    unsigned long value = fallback;
+    if (!text || !*text) return value;
+    char *end = NULL;
+    errno = 0;
+    unsigned long parsed = strtoul(text, &end, 10);
+    if (!errno && end != text && !*end && parsed > 0) value = parsed;
+    return value;
+}
+
+static int users_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
+    char path[MAX_TARGET_BYTES];
+    if (!safe_path(request->target, path, sizeof(path))) {
+        const char *body = "{\"error\":\"bad request\"}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
+    }
+    char route[MAX_TARGET_BYTES];
+    if (!path[0]) {
+        route[0] = '/'; route[1] = '\0';
+    } else {
+        if (strlen(path) + 1 >= sizeof(route)) return -1;
+        route[0] = '/'; memcpy(route + 1, path, strlen(path) + 1);
+    }
+
+    if (!strcmp(route, "/users") || !strcmp(route, "/users/")) {
+        if (!strcmp(request->method, "POST")) {
+            char name[256] = {0}, email[256] = {0};
+            if (!request->body || !parse_user_payload(request->body, name, sizeof(name),
+                                                      email, sizeof(email)) ||
+                !*name || !*email || !is_valid_email(email)) {
+                const char *body = "{\"error\":\"invalid user payload\"}\n"; *bytes = (off_t)strlen(body);
+                return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
+            }
+            pthread_mutex_lock(&database_mutex);
+            sqlite3_stmt *statement = NULL;
+            bool ok = sqlite3_prepare_v2(database,
+                "INSERT INTO users(name, email) VALUES(?, ?)", -1, &statement, NULL) == SQLITE_OK &&
+                sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                sqlite3_bind_text(statement, 2, email, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                sqlite3_step(statement) == SQLITE_DONE;
+            long long id = ok ? sqlite3_last_insert_rowid(database) : 0;
+            sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+            if (!ok) {
+                const char *body = "{\"error\":\"could not create user\"}\n"; *bytes = (off_t)strlen(body);
+                return send_json(fd, 500, "Internal Server Error", body, false, keep_alive, NULL) ? 500 : -1;
+            }
+            string_buffer payload = {0};
+            ok = append_user_json(&payload, (int)id, name, email);
+            if (!ok) { free(payload.data); return -1; }
+            *bytes = (off_t)payload.length;
+            bool sent = send_headers(fd, 201, "Created", "application/json", (off_t)payload.length,
+                                     keep_alive, NULL) &&
+                        (request->head_only || send_all(fd, payload.data, payload.length));
+            free(payload.data);
+            return sent ? 201 : -1;
+        }
+        if (!strcmp(request->method, "GET") || !strcmp(request->method, "HEAD")) {
+            char query[256] = {0};
+            const char *question = strchr(request->target, '?');
+            if (question) {
+                size_t length = strlen(question + 1);
+                if (length >= sizeof(query)) length = sizeof(query) - 1;
+                memcpy(query, question + 1, length);
+                query[length] = '\0';
+            }
+            char page_text[32] = {0}, limit_text[32] = {0}, search_text[256] = {0}, sort_text[32] = {0}, order_text[16] = {0};
+            bool has_page = parse_query_value(query, "page", page_text, sizeof(page_text));
+            bool has_limit = parse_query_value(query, "limit", limit_text, sizeof(limit_text));
+            bool has_search = parse_query_value(query, "search", search_text, sizeof(search_text));
+            bool has_sort = parse_query_value(query, "sort", sort_text, sizeof(sort_text));
+            bool has_order = parse_query_value(query, "order", order_text, sizeof(order_text));
+            unsigned long page = has_page ? parse_positive_number(page_text, 1) : 1;
+            unsigned long limit = has_limit ? parse_positive_number(limit_text, 10) : 10;
+            if (limit > 100) limit = 100;
+            const char *sort_expression = "id";
+            const char *direction = "ASC";
+            if (has_sort && !strcmp(sort_text, "name")) {
+                sort_expression = "lower(name)";
+            } else if (has_sort && !strcmp(sort_text, "email")) {
+                sort_expression = "lower(email)";
+            } else if (has_sort && !strcmp(sort_text, "id")) {
+                sort_expression = "id";
+            }
+            if (has_order && !strcmp(order_text, "desc")) direction = "DESC";
+            pthread_mutex_lock(&database_mutex);
+            sqlite3_stmt *statement = NULL;
+            char sql[1024];
+            snprintf(sql, sizeof(sql),
+                "SELECT COUNT(*) FROM users%s",
+                has_search ? " WHERE lower(name) LIKE ? OR lower(email) LIKE ?" : "");
+            bool ok = sqlite3_prepare_v2(database, sql, -1, &statement, NULL) == SQLITE_OK;
+            if (has_search) {
+                char pattern[512];
+                int written = snprintf(pattern, sizeof(pattern), "%%%s%%", search_text);
+                if (written < 0 || (size_t)written >= sizeof(pattern)) { ok = false; }
+                for (size_t i = 0; pattern[i]; i++) pattern[i] = tolower((unsigned char)pattern[i]);
+                if (ok) ok = ok && sqlite3_bind_text(statement, 1, pattern, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                      sqlite3_bind_text(statement, 2, pattern, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                      sqlite3_step(statement) == SQLITE_ROW;
+            } else {
+                ok = ok && sqlite3_step(statement) == SQLITE_ROW;
+            }
+            unsigned long total = ok ? (unsigned long)sqlite3_column_int(statement, 0) : 0;
+            sqlite3_finalize(statement);
+            statement = NULL;
+            snprintf(sql, sizeof(sql),
+                "SELECT id, name, email FROM users%s ORDER BY %s %s LIMIT ? OFFSET ?",
+                has_search ? " WHERE lower(name) LIKE ? OR lower(email) LIKE ?" : "",
+                sort_expression, direction);
+            ok = sqlite3_prepare_v2(database, sql, -1, &statement, NULL) == SQLITE_OK;
+            if (has_search) {
+                char pattern[512];
+                int written = snprintf(pattern, sizeof(pattern), "%%%s%%", search_text);
+                if (written < 0 || (size_t)written >= sizeof(pattern)) { ok = false; }
+                for (size_t i = 0; pattern[i]; i++) pattern[i] = tolower((unsigned char)pattern[i]);
+                if (ok) ok = ok && sqlite3_bind_text(statement, 1, pattern, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                      sqlite3_bind_text(statement, 2, pattern, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                      sqlite3_bind_int(statement, 3, (int)limit) == SQLITE_OK &&
+                      sqlite3_bind_int(statement, 4, (int)((page - 1) * limit)) == SQLITE_OK;
+            } else {
+                ok = ok && sqlite3_bind_int(statement, 1, (int)limit) == SQLITE_OK &&
+                      sqlite3_bind_int(statement, 2, (int)((page - 1) * limit)) == SQLITE_OK;
+            }
+            string_buffer payload = {0};
+            ok = ok && append_bytes(&payload, "{\"page\":", 8);
+            char page_value[32]; int page_length = snprintf(page_value, sizeof(page_value), "%lu", page);
+            ok = ok && page_length > 0 && (size_t)page_length < sizeof(page_value) &&
+                 append_bytes(&payload, page_value, (size_t)page_length);
+            ok = ok && append_bytes(&payload, ",\"limit\":", 9);
+            char limit_value[32]; int limit_length = snprintf(limit_value, sizeof(limit_value), "%lu", limit);
+            ok = ok && limit_length > 0 && (size_t)limit_length < sizeof(limit_value) &&
+                 append_bytes(&payload, limit_value, (size_t)limit_length);
+            ok = ok && append_bytes(&payload, ",\"total\":", 9);
+            char total_value[32]; int total_length = snprintf(total_value, sizeof(total_value), "%lu", total);
+            ok = ok && total_length > 0 && (size_t)total_length < sizeof(total_value) &&
+                 append_bytes(&payload, total_value, (size_t)total_length);
+            ok = ok && append_bytes(&payload, ",\"users\":[", 10);
+            bool first = true;
+            int step_result = SQLITE_DONE;
+            while (ok && (step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+                if (!first) ok = append_bytes(&payload, ",", 1);
+                first = false;
+                if (ok) ok = append_user_json(&payload, sqlite3_column_int(statement, 0),
+                                              (const char *)sqlite3_column_text(statement, 1),
+                                              (const char *)sqlite3_column_text(statement, 2));
+            }
+            if (ok && step_result != SQLITE_DONE) ok = false;
+            sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+            ok = ok && append_bytes(&payload, "]}", 2);
+            if (!ok) { free(payload.data); return -1; }
+            *bytes = (off_t)payload.length;
+            bool sent = send_headers(fd, 200, "OK", "application/json", (off_t)payload.length,
+                                     keep_alive, NULL) &&
+                        (request->head_only || send_all(fd, payload.data, payload.length));
+            free(payload.data);
+            return sent ? 200 : -1;
+        }
+        const char *body = "{\"error\":\"method not allowed\"}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 405, "Method Not Allowed", body, false, keep_alive, "Allow: GET, HEAD, POST") ? 405 : -1;
+    }
+
+    const char *id_text = route + 7;
+    if (route[6] != '/' || !*id_text) {
+        const char *body = "{\"error\":\"not found\"}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 404, "Not Found", body, false, keep_alive, NULL) ? 404 : -1;
+    }
+    for (const char *cursor = id_text; *cursor; cursor++) {
+        if (*cursor == '/') {
+            const char *body = "{\"error\":\"not found\"}\n"; *bytes = (off_t)strlen(body);
+            return send_json(fd, 404, "Not Found", body, false, keep_alive, NULL) ? 404 : -1;
+        }
+    }
+    unsigned long parsed = 0;
+    if (!number(id_text, 1, 2147483647UL, &parsed)) {
+        const char *body = "{\"error\":\"invalid id\"}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
+    }
+    int id = (int)parsed;
+    if (!strcmp(request->method, "GET") || !strcmp(request->method, "HEAD")) {
+        pthread_mutex_lock(&database_mutex);
+        sqlite3_stmt *statement = NULL;
+        bool ok = sqlite3_prepare_v2(database, "SELECT id, name, email FROM users WHERE id = ?", -1, &statement, NULL) == SQLITE_OK &&
+                  sqlite3_bind_int(statement, 1, id) == SQLITE_OK;
+        if (ok && sqlite3_step(statement) == SQLITE_ROW) {
+            string_buffer payload = {0};
+            ok = append_user_json(&payload, sqlite3_column_int(statement, 0),
+                                   (const char *)sqlite3_column_text(statement, 1),
+                                   (const char *)sqlite3_column_text(statement, 2));
+            sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+            if (!ok) { free(payload.data); return -1; }
+            *bytes = (off_t)payload.length;
+            bool sent = send_headers(fd, 200, "OK", "application/json", (off_t)payload.length,
+                                     keep_alive, NULL) &&
+                        (request->head_only || send_all(fd, payload.data, payload.length));
+            free(payload.data);
+            return sent ? 200 : -1;
+        }
+        sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+        const char *body = "{\"error\":\"user not found\"}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 404, "Not Found", body, false, keep_alive, NULL) ? 404 : -1;
+    }
+    if (!strcmp(request->method, "PUT")) {
+        char name[256] = {0}, email[256] = {0};
+        if (!request->body || !parse_user_payload(request->body, name, sizeof(name),
+                                                  email, sizeof(email)) ||
+            !*name || !*email || !is_valid_email(email)) {
+            const char *body = "{\"error\":\"invalid user payload\"}\n"; *bytes = (off_t)strlen(body);
+            return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
+        }
+        pthread_mutex_lock(&database_mutex);
+        sqlite3_stmt *statement = NULL;
+        bool ok = sqlite3_prepare_v2(database,
+            "UPDATE users SET name = ?, email = ? WHERE id = ?", -1, &statement, NULL) == SQLITE_OK &&
+                  sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                  sqlite3_bind_text(statement, 2, email, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                  sqlite3_bind_int(statement, 3, id) == SQLITE_OK &&
+                  sqlite3_step(statement) == SQLITE_DONE;
+        int changed = ok ? sqlite3_changes(database) : 0;
+        sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+        if (!ok) {
+            const char *body = "{\"error\":\"could not update user\"}\n"; *bytes = (off_t)strlen(body);
+            return send_json(fd, 500, "Internal Server Error", body, false, keep_alive, NULL) ? 500 : -1;
+        }
+        if (changed == 0) {
+            const char *body = "{\"error\":\"user not found\"}\n"; *bytes = (off_t)strlen(body);
+            return send_json(fd, 404, "Not Found", body, false, keep_alive, NULL) ? 404 : -1;
+        }
+        string_buffer payload = {0};
+        ok = append_user_json(&payload, id, name, email);
+        if (!ok) { free(payload.data); return -1; }
+        *bytes = (off_t)payload.length;
+        bool sent = send_headers(fd, 200, "OK", "application/json", (off_t)payload.length,
+                                 keep_alive, NULL) &&
+                    (request->head_only || send_all(fd, payload.data, payload.length));
+        free(payload.data);
+        return sent ? 200 : -1;
+    }
+    if (!strcmp(request->method, "DELETE")) {
+        pthread_mutex_lock(&database_mutex);
+        sqlite3_stmt *statement = NULL;
+        bool ok = sqlite3_prepare_v2(database, "DELETE FROM users WHERE id = ?", -1, &statement, NULL) == SQLITE_OK &&
+                  sqlite3_bind_int(statement, 1, id) == SQLITE_OK &&
+                  sqlite3_step(statement) == SQLITE_DONE;
+        int changed = ok ? sqlite3_changes(database) : 0;
+        sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+        if (!ok) {
+            const char *body = "{\"error\":\"could not delete user\"}\n"; *bytes = (off_t)strlen(body);
+            return send_json(fd, 500, "Internal Server Error", body, false, keep_alive, NULL) ? 500 : -1;
+        }
+        if (changed == 0) {
+            const char *body = "{\"error\":\"user not found\"}\n"; *bytes = (off_t)strlen(body);
+            return send_json(fd, 404, "Not Found", body, false, keep_alive, NULL) ? 404 : -1;
+        }
+        const char *body = "{\"deleted\":true}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 200, "OK", body, request->head_only, keep_alive, NULL) ? 200 : -1;
+    }
+    const char *body = "{\"error\":\"method not allowed\"}\n"; *bytes = (off_t)strlen(body);
+    return send_json(fd, 405, "Method Not Allowed", body, false, keep_alive, "Allow: GET, HEAD, PUT, DELETE") ? 405 : -1;
+}
+
 static int notes_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
     if (!strcmp(request->method, "POST")) {
         char text[1024];
@@ -470,6 +889,11 @@ static int notes_route(int fd, http_request *request, bool keep_alive, off_t *by
         *bytes = 0;
         return send_headers(fd, 303, "See Other", "text/plain; charset=utf-8", 0, keep_alive,
                             "Location: /notes") ? 303 : -1;
+    }
+    if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) {
+        const char *body = "Method not allowed.\n"; *bytes = (off_t)strlen(body);
+        return send_text(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8", body,
+                         false, keep_alive, "Allow: GET, HEAD, POST") ? 405 : -1;
     }
     string_buffer list = {0};
     append_bytes(&list, "<ul>", 4);
@@ -497,15 +921,46 @@ static int notes_route(int fd, http_request *request, bool keep_alive, off_t *by
 }
 
 static int serve_request(int fd, http_request *request, bool keep_alive, off_t *bytes) {
-    if (!strcmp(request->target, "/notes") || !strncmp(request->target, "/notes?", 7))
-        return notes_route(fd, request, keep_alive, bytes);
-    if (!strcmp(request->target, "/health")) {
-        const char *body = "{\"status\":\"ok\"}\n"; *bytes = (off_t)strlen(body);
+    char relative[MAX_TARGET_BYTES];
+    if (!safe_path(request->target, relative, sizeof(relative))) {
+        const char *body = "Bad request.\n"; *bytes = (off_t)strlen(body);
+        return send_text(fd, 400, "Bad Request", "text/plain; charset=utf-8", body,
+                         request->head_only, keep_alive, NULL) ? 400 : -1;
+    }
+    char route[MAX_TARGET_BYTES];
+    if (!relative[0]) {
+        route[0] = '/'; route[1] = '\0';
+    } else {
+        if (strlen(relative) + 1 >= sizeof(route)) return -1;
+        route[0] = '/'; memcpy(route + 1, relative, strlen(relative) + 1);
+    }
+    if (!strcmp(route, "/notes")) return notes_route(fd, request, keep_alive, bytes);
+    if (!strcmp(route, "/users") || !strcmp(route, "/users/") ||
+        (!strncmp(route, "/users/", 7) && route[7] != '\0'))
+        return users_route(fd, request, keep_alive, bytes);
+    if (!strcmp(route, "/health")) {
+        if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) {
+            const char *body = "Method not allowed.\n"; *bytes = (off_t)strlen(body);
+            return send_text(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8", body,
+                             false, keep_alive, "Allow: GET, HEAD") ? 405 : -1;
+        }
+        char body[256];
+        int length = snprintf(body, sizeof(body),
+            "{\"status\":\"ok\",\"uptime_seconds\":%lld,\"requests\":%llu,\"active_connections\":%llu,\"worker_threads\":%zu}\n",
+            (long long)(time(NULL) - started_at), atomic_load(&request_count),
+            atomic_load(&active_connections), config.threads);
+        if (length < 0 || (size_t)length >= sizeof(body)) return -1;
+        *bytes = length;
         return send_text(fd, 200, "OK", "application/json", body, request->head_only,
                          keep_alive, NULL) ? 200 : -1;
     }
     if (!strncmp(request->target, "/api/stats", 10) &&
         (request->target[10] == '\0' || request->target[10] == '?')) {
+        if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) {
+            const char *body = "Method not allowed.\n"; *bytes = (off_t)strlen(body);
+            return send_text(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8", body,
+                             false, keep_alive, "Allow: GET, HEAD") ? 405 : -1;
+        }
         char body[256];
         int length = snprintf(body, sizeof(body),
             "{\"status\":\"ok\",\"uptime_seconds\":%lld,\"requests\":%llu,"
@@ -517,16 +972,10 @@ static int serve_request(int fd, http_request *request, bool keep_alive, off_t *
         return send_text(fd, 200, "OK", "application/json", body, request->head_only,
                          keep_alive, "Cache-Control: no-store") ? 200 : -1;
     }
-    if (!strcmp(request->method, "POST")) {
-        const char *body = "No POST route matched.\n"; *bytes = (off_t)strlen(body);
+    if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) {
+        const char *body = "No route matched this method.\n"; *bytes = (off_t)strlen(body);
         return send_text(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8", body,
                          false, keep_alive, "Allow: GET, HEAD") ? 405 : -1;
-    }
-    char relative[MAX_TARGET_BYTES];
-    if (!safe_path(request->target, relative, sizeof(relative))) {
-        const char *body = "Bad request.\n"; *bytes = (off_t)strlen(body);
-        return send_text(fd, 400, "Bad Request", "text/plain; charset=utf-8", body,
-                         request->head_only, keep_alive, NULL) ? 400 : -1;
     }
     if (!*relative || relative[strlen(relative) - 1] == '/') {
         if (strlen(relative) + strlen("index.html") >= sizeof(relative)) return -1;
@@ -619,8 +1068,8 @@ static void handle_connection(int fd, const struct sockaddr_in *peer) {
             const char *reason = error == 405 ? "Method Not Allowed" : error == 505 ?
                                  "HTTP Version Not Supported" : error == 501 ? "Not Implemented" :
                                  error == 411 ? "Length Required" : error == 500 ? "Internal Server Error" : "Bad Request";
-            const char *extra = error == 405 ? "Allow: GET, HEAD, POST" : NULL;
-            const char *body = error == 405 ? "Only GET, HEAD, and POST are supported.\n" : "Malformed HTTP request.\n";
+            const char *extra = error == 405 ? "Allow: GET, HEAD, POST, PUT, DELETE" : NULL;
+            const char *body = error == 405 ? "Unsupported HTTP method.\n" : "Malformed HTTP request.\n";
             bytes = (off_t)strlen(body);
             (void)send_text(fd, error, reason, "text/plain; charset=utf-8", body, false, false, extra);
             status = error; keep = false;
@@ -697,7 +1146,9 @@ int main(int argc, char **argv) {
     }
     if (sqlite3_open(config.database_path, &database) != SQLITE_OK ||
         sqlite3_exec(database, "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS notes("
-                     "id INTEGER PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+                     "id INTEGER PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+                     "CREATE TABLE IF NOT EXISTS users("
+                     "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
                      NULL, NULL, NULL) != SQLITE_OK) {
         fprintf(stderr, "database: %s\n", database ? sqlite3_errmsg(database) : "could not open");
         if (database) sqlite3_close(database);

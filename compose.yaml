@@ -2,7 +2,7 @@ services:
   server:
     build: .
     ports:
-      - "8080:8080"
+      - "8080:10000"
     init: true
     read_only: true
     tmpfs:

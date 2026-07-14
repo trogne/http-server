@@ -73,6 +73,12 @@
     let currentSort = 'id';
     let currentOrder = 'asc';
     let statusRetryTimer;
+    let apiConfirmed = false;
+
+    function markApiAvailable(details = '') {
+      apiConfirmed = true;
+      statusText.textContent = details ? `API OK · ${details}` : 'API OK';
+    }
 
     function updateOrderButton() {
       orderButton.textContent = `Order: ${currentOrder === 'asc' ? 'Asc' : 'Desc'}`;
@@ -83,7 +89,9 @@
       const params = new URLSearchParams({ page: currentPage, limit: 5, sort: currentSort, order: currentOrder });
       if (currentSearch) params.set('search', currentSearch);
       const response = await fetch(`/users?${params.toString()}`);
+      if (!response.ok) throw new Error(`Users request returned ${response.status}`);
       const data = await response.json();
+      markApiAvailable();
       usersList.innerHTML = '';
       if (!data.users.length) {
         const emptyItem = document.createElement('li');
@@ -130,10 +138,12 @@
           console.debug('Optional stats request failed:', error);
         }
         const requests = Number.isFinite(requestCount) ? ` · ${requestCount} req` : '';
-        statusText.textContent = `API OK · ${health.uptime_seconds}s${requests}`;
+        markApiAvailable(`${health.uptime_seconds}s${requests}`);
       } catch (error) {
-        statusText.textContent = 'Server is waking up…';
-        statusRetryTimer = setTimeout(refreshStatus, 3000);
+        if (!apiConfirmed) {
+          statusText.textContent = 'Server is waking up…';
+          statusRetryTimer = setTimeout(refreshStatus, 3000);
+        }
       } finally {
         loading.style.display = 'none';
       }

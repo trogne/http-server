@@ -1,6 +1,7 @@
-from ubuntu : 
+From WSL shell:
 cd /home/trogne/projects/http-server && code .
-from windows:
-code \\wsl$\Ubuntu\home\trogne\projects\http-server
-	
-	ou right-click and choose Open Folder in VS Code
+
+From Windows but explicitly using the WSL URI:
+
+code --folder-uri vscode-remote://wsl+Ubuntu/home/trogne/projects/http-server
+

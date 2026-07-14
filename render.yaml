@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: dense-http-api
+    name: fisobach
     runtime: docker
     plan: free
     healthCheckPath: /health

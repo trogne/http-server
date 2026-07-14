@@ -60,7 +60,9 @@ def main():
         config.write_text(
             f"port = {port}\nthreads = 8\nqueue_capacity = 64\n"
             f"keepalive_timeout = 2\nkeepalive_requests = 10\n"
-            f"document_root = {root}\nlog_file = {log}\n",
+            f"document_root = {root}\nlog_file = {log}\n"
+            f"database_path = {Path(temp) / 'app.db'}\n"
+            f"template_root = {Path.cwd() / 'templates'}\n",
             encoding="utf-8",
         )
         process = subprocess.Popen(
@@ -97,6 +99,21 @@ def main():
 
             assert request(port, path="/missing")[0] == 404
             assert request(port, method="POST")[0] == 405
+
+            status, _, body = request(port, path="/notes")
+            assert status == 200 and b"<h1>Notes</h1>" in body
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            payload = "text=%3Cscript%3Ealert%281%29%3C%2Fscript%3E"
+            connection.request("POST", "/notes", payload, {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Content-Length": str(len(payload)),
+            })
+            response = connection.getresponse()
+            assert response.status == 303 and response.getheader("Location") == "/notes"
+            response.read(); connection.close()
+            status, _, body = request(port, path="/notes")
+            assert status == 200 and b"&lt;script&gt;alert(1)&lt;/script&gt;" in body
+            assert b"<script>alert(1)</script>" not in body
             assert raw_request(port, b"GET / HTTP/1.1\r\n\r\n").startswith(b"HTTP/1.1 400")
             assert raw_request(port, b"GET /%2e%2e/secret HTTP/1.1\r\nHost: x\r\n\r\n").startswith(
                 b"HTTP/1.1 400"

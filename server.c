@@ -8,6 +8,7 @@
 #include <netinet/tcp.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sqlite3.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -29,6 +30,7 @@
 #define MAX_HEADER_BYTES 16384
 #define MAX_TARGET_BYTES 4096
 #define MAX_KEEPALIVE_REQUESTS 100
+#define MAX_BODY_BYTES 1048576
 
 typedef struct {
     uint16_t port;
@@ -38,6 +40,8 @@ typedef struct {
     size_t keepalive_requests;
     char document_root[4096];
     char log_file[4096];
+    char database_path[4096];
+    char template_root[4096];
 } server_config;
 
 typedef struct {
@@ -54,12 +58,16 @@ typedef struct {
     int major, minor;
     bool keep_alive;
     bool head_only;
+    size_t content_length;
+    char content_type[128];
+    char *body;
 } http_request;
 
 static server_config config = {
     .port = 8080, .threads = 4, .queue_capacity = 256,
     .keepalive_timeout = 5, .keepalive_requests = MAX_KEEPALIVE_REQUESTS,
-    .document_root = "./public", .log_file = "-"
+    .document_root = "./public", .log_file = "-",
+    .database_path = "./app.db", .template_root = "./templates"
 };
 static connection_queue queue;
 static volatile sig_atomic_t stopping;
@@ -69,6 +77,8 @@ static _Atomic unsigned long long active_connections;
 static time_t started_at;
 static FILE *access_log;
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+static sqlite3 *database;
+static pthread_mutex_t database_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void on_signal(int signum) {
     (void)signum;
@@ -126,6 +136,10 @@ static bool apply_setting(const char *key, const char *value, const char *source
         ok = copy_setting(config.document_root, sizeof(config.document_root), value);
     } else if (!strcmp(key, "log_file")) {
         ok = copy_setting(config.log_file, sizeof(config.log_file), value);
+    } else if (!strcmp(key, "database_path")) {
+        ok = copy_setting(config.database_path, sizeof(config.database_path), value);
+    } else if (!strcmp(key, "template_root")) {
+        ok = copy_setting(config.template_root, sizeof(config.template_root), value);
     } else {
         fprintf(stderr, "%s:%zu: unknown setting '%s'\n", source, line, key);
         return false;
@@ -330,18 +344,161 @@ static int parse_request(char *header, http_request *request) {
             else if (contains_case_insensitive(value, "keep-alive")) request->keep_alive = true;
         } else if (!strcasecmp(cursor, "Content-Length")) {
             unsigned long length;
-            if (!number(value, 0, 1048576, &length) || length != 0 || content_length) return 400;
-            content_length = true;
+            if (!number(value, 0, MAX_BODY_BYTES, &length) || content_length) return 400;
+            request->content_length = (size_t)length; content_length = true;
+        } else if (!strcasecmp(cursor, "Content-Type")) {
+            if (strlen(value) >= sizeof(request->content_type)) return 400;
+            memcpy(request->content_type, value, strlen(value) + 1);
         } else if (!strcasecmp(cursor, "Transfer-Encoding")) transfer_encoding = true;
         cursor = end + 2;
     }
     if (request->minor == 1 && !host) return 400;
     if (transfer_encoding) return 501;
-    if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) return 405;
+    if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD") &&
+        strcmp(request->method, "POST")) return 405;
+    if (!strcmp(request->method, "POST") && !content_length) return 411;
     return 0;
 }
 
+typedef struct { char *data; size_t length, capacity; } string_buffer;
+
+static bool append_bytes(string_buffer *out, const char *data, size_t length) {
+    if (length > SIZE_MAX - out->length - 1) return false;
+    size_t needed = out->length + length + 1;
+    if (needed > out->capacity) {
+        size_t capacity = out->capacity ? out->capacity : 1024;
+        while (capacity < needed) {
+            if (capacity > SIZE_MAX / 2) { capacity = needed; break; }
+            capacity *= 2;
+        }
+        char *grown = realloc(out->data, capacity);
+        if (!grown) return false;
+        out->data = grown; out->capacity = capacity;
+    }
+    memcpy(out->data + out->length, data, length);
+    out->length += length; out->data[out->length] = '\0';
+    return true;
+}
+
+static bool append_html(string_buffer *out, const char *text) {
+    for (; *text; text++) {
+        const char *replacement = NULL;
+        if (*text == '&') replacement = "&amp;";
+        else if (*text == '<') replacement = "&lt;";
+        else if (*text == '>') replacement = "&gt;";
+        else if (*text == '\"') replacement = "&quot;";
+        else if (*text == '\'') replacement = "&#39;";
+        if (replacement) { if (!append_bytes(out, replacement, strlen(replacement))) return false; }
+        else if (!append_bytes(out, text, 1)) return false;
+    }
+    return true;
+}
+
+static char *read_file(const char *path, size_t *length) {
+    FILE *file = fopen(path, "rb");
+    if (!file || fseek(file, 0, SEEK_END)) { if (file) fclose(file); return NULL; }
+    long size = ftell(file);
+    if (size < 0 || fseek(file, 0, SEEK_SET)) { fclose(file); return NULL; }
+    char *data = malloc((size_t)size + 1);
+    if (!data) { fclose(file); return NULL; }
+    size_t got = fread(data, 1, (size_t)size, file); fclose(file);
+    if (got != (size_t)size) { free(data); return NULL; }
+    data[got] = '\0'; *length = got; return data;
+}
+
+/* Tiny template language: {{name}} HTML-escapes; {{{name}}} inserts trusted HTML. */
+static char *render_template(const char *name, const char *title, const char *content, size_t *length) {
+    char path[8192];
+    if (snprintf(path, sizeof(path), "%s/%s", config.template_root, name) >= (int)sizeof(path)) return NULL;
+    size_t source_length; char *source = read_file(path, &source_length);
+    if (!source) return NULL;
+    string_buffer out = {0}; size_t cursor = 0;
+    while (cursor < source_length) {
+        char *open = strstr(source + cursor, "{{");
+        if (!open) { append_bytes(&out, source + cursor, source_length - cursor); break; }
+        append_bytes(&out, source + cursor, (size_t)(open - source - cursor));
+        bool raw = open[2] == '{'; const char *close = strstr(open + (raw ? 3 : 2), raw ? "}}}" : "}}");
+        if (!close) { append_bytes(&out, open, strlen(open)); break; }
+        size_t key_length = (size_t)(close - open) - (raw ? 3U : 2U);
+        const char *value = "";
+        if (key_length == 5 && !strncmp(open + (raw ? 3 : 2), "title", 5)) value = title;
+        else if (key_length == 7 && !strncmp(open + (raw ? 3 : 2), "content", 7)) value = content;
+        if (raw) append_bytes(&out, value, strlen(value)); else append_html(&out, value);
+        cursor = (size_t)(close - source) + (raw ? 3U : 2U);
+    }
+    free(source);
+    if (!out.data) out.data = calloc(1, 1);
+    *length = out.length; return out.data;
+}
+
+static bool form_value(const char *body, const char *key, char *out, size_t capacity) {
+    size_t key_length = strlen(key);
+    for (const char *p = body; *p; p = strchr(p, '&') ? strchr(p, '&') + 1 : p + strlen(p)) {
+        if (strncmp(p, key, key_length) || p[key_length] != '=') continue;
+        p += key_length + 1; size_t used = 0;
+        while (*p && *p != '&') {
+            unsigned char c = (unsigned char)*p++;
+            if (c == '+') c = ' ';
+            else if (c == '%' && p[0] && p[1]) {
+                int hi = hex(p[0]), lo = hex(p[1]); if (hi < 0 || lo < 0) return false;
+                c = (unsigned char)((hi << 4) | lo); p += 2;
+            }
+            if (!c || used + 1 >= capacity) return false;
+            out[used++] = (char)c;
+        }
+        out[used] = '\0'; return used > 0;
+    }
+    return false;
+}
+
+static int notes_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
+    if (!strcmp(request->method, "POST")) {
+        char text[1024];
+        if (!contains_case_insensitive(request->content_type, "application/x-www-form-urlencoded") ||
+            !form_value(request->body ? request->body : "", "text", text, sizeof(text))) {
+            const char *body = "Expected a non-empty form field named text.\n"; *bytes = (off_t)strlen(body);
+            return send_text(fd, 422, "Unprocessable Content", "text/plain; charset=utf-8", body,
+                             false, keep_alive, NULL) ? 422 : -1;
+        }
+        pthread_mutex_lock(&database_mutex);
+        sqlite3_stmt *statement = NULL;
+        bool ok = sqlite3_prepare_v2(database, "INSERT INTO notes(text) VALUES(?)", -1, &statement, NULL) == SQLITE_OK &&
+                  sqlite3_bind_text(statement, 1, text, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                  sqlite3_step(statement) == SQLITE_DONE;
+        sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+        if (!ok) return -1;
+        *bytes = 0;
+        return send_headers(fd, 303, "See Other", "text/plain; charset=utf-8", 0, keep_alive,
+                            "Location: /notes") ? 303 : -1;
+    }
+    string_buffer list = {0};
+    append_bytes(&list, "<ul>", 4);
+    pthread_mutex_lock(&database_mutex);
+    sqlite3_stmt *statement = NULL;
+    bool ok = sqlite3_prepare_v2(database, "SELECT id, text FROM notes ORDER BY id DESC", -1, &statement, NULL) == SQLITE_OK;
+    while (ok && sqlite3_step(statement) == SQLITE_ROW) {
+        char prefix[64]; int n = snprintf(prefix, sizeof(prefix), "<li data-id=\"%lld\">", sqlite3_column_int64(statement, 0));
+        ok = n > 0 && (size_t)n < sizeof(prefix) && append_bytes(&list, prefix, (size_t)n) &&
+             append_html(&list, (const char *)sqlite3_column_text(statement, 1)) && append_bytes(&list, "</li>", 5);
+    }
+    sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+    ok = ok && append_bytes(&list, "</ul>", 5);
+    size_t page_length = 0; char *page = ok ? render_template("notes.html", "Notes", list.data, &page_length) : NULL;
+    free(list.data);
+    if (!page) {
+        const char *body = "Template not found.\n"; *bytes = (off_t)strlen(body);
+        return send_text(fd, 500, "Internal Server Error", "text/plain; charset=utf-8", body,
+                         request->head_only, keep_alive, NULL) ? 500 : -1;
+    }
+    *bytes = (off_t)page_length;
+    bool sent = send_headers(fd, 200, "OK", "text/html; charset=utf-8", (off_t)page_length, keep_alive, NULL) &&
+                (request->head_only || send_all(fd, page, page_length));
+    free(page); return sent ? 200 : -1;
+}
+
 static int serve_request(int fd, http_request *request, bool keep_alive, off_t *bytes) {
+    if (!strcmp(request->target, "/notes") || !strncmp(request->target, "/notes?", 7))
+        return notes_route(fd, request, keep_alive, bytes);
     if (!strcmp(request->target, "/health")) {
         const char *body = "{\"status\":\"ok\"}\n"; *bytes = (off_t)strlen(body);
         return send_text(fd, 200, "OK", "application/json", body, request->head_only,
@@ -359,6 +516,11 @@ static int serve_request(int fd, http_request *request, bool keep_alive, off_t *
         *bytes = length;
         return send_text(fd, 200, "OK", "application/json", body, request->head_only,
                          keep_alive, "Cache-Control: no-store") ? 200 : -1;
+    }
+    if (!strcmp(request->method, "POST")) {
+        const char *body = "No POST route matched.\n"; *bytes = (off_t)strlen(body);
+        return send_text(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8", body,
+                         false, keep_alive, "Allow: GET, HEAD") ? 405 : -1;
     }
     char relative[MAX_TARGET_BYTES];
     if (!safe_path(request->target, relative, sizeof(relative))) {
@@ -434,13 +596,31 @@ static void handle_connection(int fd, const struct sockaddr_in *peer) {
         http_request request = {.major = 1, .minor = 1};
         struct timespec begin, finish; clock_gettime(CLOCK_MONOTONIC, &begin);
         int error = parse_request(header, &request);
+        if (!error && request.content_length) {
+            request.body = malloc(request.content_length + 1);
+            if (!request.body) error = 500;
+            size_t copied = used < request.content_length ? used : request.content_length;
+            if (!error) memcpy(request.body, buffer, copied);
+            if (copied) {
+                memmove(buffer, buffer + copied, used - copied);
+                used -= copied; buffer[used] = '\0';
+            }
+            while (!error && copied < request.content_length) {
+                ssize_t received = recv(fd, request.body + copied, request.content_length - copied, 0);
+                if (received < 0 && errno == EINTR) continue;
+                if (received <= 0) { error = 400; break; }
+                copied += (size_t)received;
+            }
+            if (!error) request.body[request.content_length] = '\0';
+        }
         bool keep = request.keep_alive && sequence + 1 < config.keepalive_requests;
         int status; off_t bytes = 0;
         if (error) {
             const char *reason = error == 405 ? "Method Not Allowed" : error == 505 ?
-                                 "HTTP Version Not Supported" : error == 501 ? "Not Implemented" : "Bad Request";
-            const char *extra = error == 405 ? "Allow: GET, HEAD" : NULL;
-            const char *body = error == 405 ? "Only GET and HEAD are supported.\n" : "Malformed HTTP request.\n";
+                                 "HTTP Version Not Supported" : error == 501 ? "Not Implemented" :
+                                 error == 411 ? "Length Required" : error == 500 ? "Internal Server Error" : "Bad Request";
+            const char *extra = error == 405 ? "Allow: GET, HEAD, POST" : NULL;
+            const char *body = error == 405 ? "Only GET, HEAD, and POST are supported.\n" : "Malformed HTTP request.\n";
             bytes = (off_t)strlen(body);
             (void)send_text(fd, error, reason, "text/plain; charset=utf-8", body, false, false, extra);
             status = error; keep = false;
@@ -448,6 +628,7 @@ static void handle_connection(int fd, const struct sockaddr_in *peer) {
             atomic_fetch_add(&request_count, 1);
             status = serve_request(fd, &request, keep, &bytes);
         }
+        free(request.body);
         clock_gettime(CLOCK_MONOTONIC, &finish);
         long elapsed = (finish.tv_sec - begin.tv_sec) * 1000000L +
                        (finish.tv_nsec - begin.tv_nsec) / 1000L;
@@ -514,6 +695,13 @@ int main(int argc, char **argv) {
     if (stat(config.document_root, &root_info) || !S_ISDIR(root_info.st_mode)) {
         fprintf(stderr, "document_root is not a directory: %s\n", config.document_root); return EXIT_FAILURE;
     }
+    if (sqlite3_open(config.database_path, &database) != SQLITE_OK ||
+        sqlite3_exec(database, "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS notes("
+                     "id INTEGER PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+                     NULL, NULL, NULL) != SQLITE_OK) {
+        fprintf(stderr, "database: %s\n", database ? sqlite3_errmsg(database) : "could not open");
+        if (database) sqlite3_close(database); return EXIT_FAILURE;
+    }
     access_log = !strcmp(config.log_file, "-") ? stdout : fopen(config.log_file, "a");
     if (!access_log) { perror(config.log_file); return EXIT_FAILURE; }
     if (!queue_init()) { perror("queue_init"); return EXIT_FAILURE; }
@@ -550,5 +738,6 @@ int main(int argc, char **argv) {
     free(workers); free(queue.items);
     pthread_cond_destroy(&queue.not_empty); pthread_mutex_destroy(&queue.mutex);
     if (access_log != stdout) fclose(access_log);
+    sqlite3_close(database);
     return started == config.threads ? EXIT_SUCCESS : EXIT_FAILURE;
 }

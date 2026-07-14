@@ -1,8 +1,8 @@
 # dense-http
 
-A compact production-oriented HTTP/1.1 static file server for Linux, written in
-C. It uses a bounded accept queue and a fixed pthread worker pool, serves files
-with `sendfile(2)`, and supports persistent connections and pipelined requests.
+A compact HTTP/1.1 web framework for Linux, written in C directly on TCP sockets.
+It includes routing, an escaped template engine, SQLite persistence, static files,
+a bounded accept queue, and a fixed pthread worker pool. No HTTP library is used.
 
 It is suitable for learning, internal services, and controlled deployments. For
 public Internet exposure, put it behind a TLS-terminating reverse proxy and apply
@@ -20,6 +20,10 @@ the resource limits appropriate to your environment.
 - Common-style access logs with response time in microseconds
 - Strict startup validation and graceful `SIGINT`/`SIGTERM` shutdown
 - `/health` and `/api/stats` operational endpoints
+- Dynamic `GET`, `HEAD`, and form `POST` routes
+- `{{value}}` escaped and `{{{trusted_html}}}` raw template substitutions
+- SQLite-backed notes example at `/notes`
+- A raw TCP protocol client (`tcp_client`)
 
 ## Build and run
 
@@ -35,6 +39,13 @@ The checked-in `server.conf` expects to run from the repository root. Open
 
 ```sh
 ./http_server --config server.conf --port 9000 --threads 16
+```
+
+The example application is at <http://localhost:8080/notes>. Talk to it without
+curl or an HTTP client library:
+
+```sh
+./tcp_client 127.0.0.1 8080 /notes
 ```
 
 With Docker Desktop on Windows:
@@ -59,6 +70,17 @@ with `#` are ignored. Unknown keys and invalid values prevent startup.
 | `keepalive_requests` | `100` | Maximum requests per connection |
 | `document_root` | `./public` | Directory exposed as `/` |
 | `log_file` | `-` | Append-only access log; `-` means stdout |
+| `database_path` | `./app.db` | SQLite database file |
+| `template_root` | `./templates` | Directory containing templates |
+
+## Framework anatomy
+
+`parse_request` is the protocol boundary: it parses the request line and headers,
+enforces size limits, and describes the body. `serve_request` is the router: add
+dynamic routes before its final static-file fallback. `notes_route` demonstrates
+method dispatch, form decoding, prepared SQLite statements, redirects, and
+template rendering. Template values are escaped by default; triple braces are
+only for HTML produced by trusted application code.
 
 CLI `--port` and `--threads` values override their configuration-file values,
 regardless of argument order.

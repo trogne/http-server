@@ -72,6 +72,7 @@
     let currentSearch = '';
     let currentSort = 'id';
     let currentOrder = 'asc';
+    let statusRetryTimer;
 
     function updateOrderButton() {
       orderButton.textContent = `Order: ${currentOrder === 'asc' ? 'Asc' : 'Desc'}`;
@@ -115,18 +116,27 @@
     }
 
     async function refreshStatus() {
+      clearTimeout(statusRetryTimer);
       loading.style.display = 'block';
       try {
-        const [healthResponse, statsResponse] = await Promise.all([fetch('/health'), fetch('/api/stats')]);
+        const healthResponse = await fetch('/health', { cache: 'no-store' });
+        if (!healthResponse.ok) throw new Error(`Health check returned ${healthResponse.status}`);
         const health = await healthResponse.json();
-        const stats = await statsResponse.json();
-        statusText.textContent = healthResponse.ok
-          ? `API OK · ${health.uptime_seconds}s · ${stats.requests} req`
-          : 'API unavailable';
+        let requestCount = health.requests;
+        try {
+          const statsResponse = await fetch('/api/stats', { cache: 'no-store' });
+          if (statsResponse.ok) requestCount = (await statsResponse.json()).requests;
+        } catch (error) {
+          console.debug('Optional stats request failed:', error);
+        }
+        const requests = Number.isFinite(requestCount) ? ` · ${requestCount} req` : '';
+        statusText.textContent = `API OK · ${health.uptime_seconds}s${requests}`;
       } catch (error) {
-        statusText.textContent = 'API unavailable';
+        statusText.textContent = 'Server is waking up…';
+        statusRetryTimer = setTimeout(refreshStatus, 3000);
+      } finally {
+        loading.style.display = 'none';
       }
-      loading.style.display = 'none';
     }
 
     function setMessage(text, type = 'info') {

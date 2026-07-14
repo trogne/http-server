@@ -1,0 +1,6 @@
+from ubuntu : 
+cd /home/trogne/projects/http-server && code .
+from windows:
+code \\wsl$\Ubuntu\home\trogne\projects\http-server
+	
+	ou right-click and choose Open Folder in VS Code

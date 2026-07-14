@@ -700,7 +700,8 @@ int main(int argc, char **argv) {
                      "id INTEGER PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
                      NULL, NULL, NULL) != SQLITE_OK) {
         fprintf(stderr, "database: %s\n", database ? sqlite3_errmsg(database) : "could not open");
-        if (database) sqlite3_close(database); return EXIT_FAILURE;
+        if (database) sqlite3_close(database);
+        return EXIT_FAILURE;
     }
     access_log = !strcmp(config.log_file, "-") ? stdout : fopen(config.log_file, "a");
     if (!access_log) { perror(config.log_file); return EXIT_FAILURE; }

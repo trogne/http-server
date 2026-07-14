@@ -655,6 +655,117 @@ static unsigned long parse_positive_number(const char *text, unsigned long fallb
     return value;
 }
 
+static bool parse_analysis_payload(const char *body, char *notes, size_t capacity) {
+    const char *cursor = body;
+    while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+    if (*cursor++ != '{') return false;
+    bool found = false;
+    for (;;) {
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (*cursor == '}') { cursor++; break; }
+        char key[64], value[2048];
+        if (!parse_json_string(&cursor, key, sizeof(key))) return false;
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (*cursor++ != ':') return false;
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (!parse_json_string(&cursor, value, sizeof(value))) return false;
+        if (!strcmp(key, "notes")) {
+            size_t length = strlen(value);
+            if (!length || length >= capacity || found) return false;
+            memcpy(notes, value, length + 1);
+            found = true;
+        }
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        if (*cursor == ',') { cursor++; continue; }
+        if (*cursor == '}') { cursor++; break; }
+        return false;
+    }
+    while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+    return found && *cursor == '\0';
+}
+
+static bool parse_note(const char *text, int *midi, unsigned int *pitch_class) {
+    if (!text[0]) return false;
+    int pitch;
+    switch (toupper((unsigned char)text[0])) {
+        case 'C': pitch = 0; break;
+        case 'D': pitch = 2; break;
+        case 'E': pitch = 4; break;
+        case 'F': pitch = 5; break;
+        case 'G': pitch = 7; break;
+        case 'A': pitch = 9; break;
+        case 'B': pitch = 11; break;
+        default: return false;
+    }
+    const char *cursor = text + 1;
+    if (*cursor == '#') { pitch++; cursor++; }
+    else if (*cursor == 'b' || *cursor == 'B') { pitch--; cursor++; }
+    char *end = NULL;
+    errno = 0;
+    long octave = strtol(cursor, &end, 10);
+    if (errno || end == cursor || *end || octave < -1 || octave > 9) return false;
+    pitch = (pitch % 12 + 12) % 12;
+    long value = (octave + 1) * 12 + pitch;
+    if (value < 0 || value > 127) return false;
+    *midi = (int)value;
+    *pitch_class = (unsigned int)pitch;
+    return true;
+}
+
+static int analysis_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
+    if (strcmp(request->method, "POST")) {
+        const char *body = "{\"error\":\"method not allowed\"}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 405, "Method Not Allowed", body, false, keep_alive,
+                         "Allow: POST") ? 405 : -1;
+    }
+    char notes[2048];
+    if (!request->body || !parse_analysis_payload(request->body, notes, sizeof(notes))) {
+        const char *body = "{\"error\":\"expected JSON with a non-empty notes string\"}\n";
+        *bytes = (off_t)strlen(body);
+        return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
+    }
+    size_t count = 0, ascending = 0, descending = 0, repeated = 0;
+    unsigned int pitch_classes = 0;
+    int lowest = 128, highest = -1, previous = -1;
+    char *save = NULL;
+    for (char *token = strtok_r(notes, ", \t\r\n", &save); token;
+         token = strtok_r(NULL, ", \t\r\n", &save)) {
+        int midi; unsigned int pitch_class;
+        if (count == 128 || !parse_note(token, &midi, &pitch_class)) {
+            const char *body = "{\"error\":\"use 1-128 notes such as C4, F#4, or Bb3\"}\n";
+            *bytes = (off_t)strlen(body);
+            return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
+        }
+        if (previous >= 0) {
+            if (midi > previous) ascending++;
+            else if (midi < previous) descending++;
+            else repeated++;
+        }
+        if (midi < lowest) lowest = midi;
+        if (midi > highest) highest = midi;
+        pitch_classes |= 1U << pitch_class;
+        previous = midi; count++;
+    }
+    if (!count) {
+        const char *body = "{\"error\":\"at least one note is required\"}\n";
+        *bytes = (off_t)strlen(body);
+        return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
+    }
+    unsigned int distinct = 0;
+    for (unsigned int bits = pitch_classes; bits; bits >>= 1) distinct += bits & 1U;
+    const char *contour = ascending > descending ? "predominantly ascending" :
+                          descending > ascending ? "predominantly descending" : "balanced";
+    char body[512];
+    int length = snprintf(body, sizeof(body),
+        "{\"note_count\":%zu,\"distinct_pitch_classes\":%u,\"lowest_midi\":%d,"
+        "\"highest_midi\":%d,\"range_semitones\":%d,\"ascending\":%zu,"
+        "\"descending\":%zu,\"repeated\":%zu,\"contour\":\"%s\"}\n",
+        count, distinct, lowest, highest, highest - lowest, ascending, descending, repeated, contour);
+    if (length < 0 || (size_t)length >= sizeof(body)) return -1;
+    *bytes = (off_t)length;
+    return send_json(fd, 200, "OK", body, false, keep_alive, "Cache-Control: no-store") ? 200 : -1;
+}
+
 static int users_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
     char path[MAX_TARGET_BYTES];
     if (!safe_path(request->target, path, sizeof(path))) {
@@ -979,6 +1090,7 @@ static int serve_request(int fd, http_request *request, bool keep_alive, off_t *
     if (!strcmp(route, "/users") || !strcmp(route, "/users/") ||
         (!strncmp(route, "/users/", 7) && route[7] != '\0'))
         return users_route(fd, request, keep_alive, bytes);
+    if (!strcmp(route, "/api/analyze")) return analysis_route(fd, request, keep_alive, bytes);
     if (!strcmp(route, "/health")) {
         if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) {
             const char *body = "Method not allowed.\n"; *bytes = (off_t)strlen(body);

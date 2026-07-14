@@ -139,6 +139,13 @@ def main():
                 b"HTTP/1.1 400"
             )
 
+            status, _, body = json_request(port, "POST", "/api/analyze", b'{"notes":"C4 D4 E4 F4 E4 D4 C4"}')
+            analysis = json.loads(body)
+            assert status == 200 and analysis["note_count"] == 7
+            assert analysis["range_semitones"] == 5 and analysis["contour"] == "balanced"
+            assert json_request(port, "POST", "/api/analyze", b'{"notes":"C4 nope G4"}')[0] == 400
+            assert request(port, "GET", "/api/analyze")[0] == 405
+
             assert json_request(port, "POST", "/users", b'{"name":"Ada","email":"ada@example.com"}')[0] == 401
             status, headers, body = json_request(port, "POST", "/users", b'{"name":"Ada","email":"ada@example.com"}', token)
             assert status == 201 and headers["Content-Type"].startswith("application/json")

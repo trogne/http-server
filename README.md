@@ -24,6 +24,7 @@ the resource limits appropriate to your environment.
 - `{{value}}` escaped and `{{{trusted_html}}}` raw template substitutions
 - SQLite-backed notes example at `/notes`
 - SQLite-backed JSON Users API at `/users`, with CRUD, search, sorting, and pagination
+- Bach-themed melodic analysis at `POST /api/analyze`
 - A raw TCP protocol client (`tcp_client`)
 
 ## Build and run
@@ -59,6 +60,14 @@ as `Authorization: Bearer TOKEN`. Set a secret of at least 16 characters in the
 `DENSE_HTTP_API_TOKEN` environment variable. If it is unset, user writes fail
 closed with `503 Service Unavailable`. The browser UI keeps the entered token in
 memory only; it is not committed or saved to local storage.
+
+Analyze a melody by posting a `notes` string in scientific pitch notation:
+
+```sh
+curl -X POST http://localhost:8080/api/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"notes":"C4 D4 E4 F4 G4 F4 E4 D4 C4"}'
+```
 
 With Docker Desktop on Windows:
 

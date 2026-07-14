@@ -3,19 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Users API Demo</title>
+  <title>Bach Music Analysis</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <main>
     <div class="hero">
-      <h1>Users API Demo</h1>
-      <p class="hero-copy">A tiny REST demo for creating, editing, searching, and paginating users.</p>
+      <div class="bach-mark">BWV</div>
+      <h1>Bach Music Analysis</h1>
+      <p class="hero-copy">A contrapuntal control room for exploring melodic shape and managing research collaborators.</p>
     </div>
     <div class="about-card">
-      <strong>What you can do</strong>
-      <span>Create records, update them inline, delete them, and browse the results page by page.</span>
+      <strong>Melodic microscope</strong>
+      <span>Enter scientific pitch notation to measure range, pitch-class variety, and contour.</span>
     </div>
+    <section class="analysis-card">
+      <h2>Analyze a melodic subject</h2>
+      <form id="analysis-form">
+        <label>Notes
+          <textarea id="analysis-notes" rows="3">C4 D4 E4 F4 G4 F4 E4 D4 C4</textarea>
+        </label>
+        <button type="submit">Analyze subject</button>
+      </form>
+      <div id="analysis-result" class="analysis-result" aria-live="polite">Awaiting a subject…</div>
+    </section>
     <div id="status-panel" class="status-panel">
       <span id="status-text">Checking server…</span>
       <span id="user-count">Users: 0</span>
@@ -36,7 +47,7 @@
     </form>
     <p id="message" role="status"></p>
     <div id="loading" class="loading" aria-live="polite">Loading…</div>
-    <h2>Users</h2>
+    <h2>Research collaborators</h2>
     <div class="toolbar">
       <input id="search" placeholder="Search by name or email">
       <select id="sort-select">
@@ -58,6 +69,9 @@
   </main>
   <script>
     const form = document.getElementById('user-form');
+    const analysisForm = document.getElementById('analysis-form');
+    const analysisNotes = document.getElementById('analysis-notes');
+    const analysisResult = document.getElementById('analysis-result');
     const message = document.getElementById('message');
     const usersList = document.getElementById('users');
     const searchInput = document.getElementById('search');
@@ -96,6 +110,27 @@
       if (token) headers.Authorization = `Bearer ${token}`;
       return headers;
     }
+
+    analysisForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      analysisResult.textContent = 'Analyzing contrapuntal motion…';
+      try {
+        const response = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: analysisNotes.value }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Analysis failed');
+        analysisResult.textContent =
+          `${data.note_count} notes · ${data.distinct_pitch_classes} pitch classes · ` +
+          `${data.range_semitones} semitone range · ${data.contour} ` +
+          `(↑${data.ascending} ↓${data.descending} =${data.repeated})`;
+        markApiAvailable();
+      } catch (error) {
+        analysisResult.textContent = error.message;
+      }
+    });
 
     async function loadUsers() {
       loading.style.display = 'block';

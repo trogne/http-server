@@ -13,7 +13,7 @@
       <span class="brand-mark">FB</span>
       <span>FisoBach <small>Melodic Intelligence</small></span>
     </a>
-    <div class="live"><i></i><span id="status">Connecting</span></div>
+    <div class="live"><i></i><span id="status">Analysis engine online</span></div>
   </header>
 
   <main>
@@ -155,18 +155,6 @@
     }
 
     $('refresh').addEventListener('click', loadHistory);
-    async function checkHealth() {
-      try {
-        const response = await fetch(`/health?t=${Date.now()}`, {cache:'no-store'});
-        if (!response.ok) throw new Error();
-        $('status').textContent = 'Analysis engine online';
-        setTimeout(checkHealth, 60000);
-      } catch {
-        $('status').textContent = 'Server waking up';
-        setTimeout(checkHealth, 3000);
-      }
-    }
-    checkHealth();
     loadHistory();
   </script>
 </body>

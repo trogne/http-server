@@ -155,7 +155,18 @@
     }
 
     $('refresh').addEventListener('click', loadHistory);
-    fetch('/health', {cache:'no-store'}).then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(() => { $('status').textContent='Analysis engine online'; }).catch(() => { $('status').textContent='Server waking up'; });
+    async function checkHealth() {
+      try {
+        const response = await fetch(`/health?t=${Date.now()}`, {cache:'no-store'});
+        if (!response.ok) throw new Error();
+        $('status').textContent = 'Analysis engine online';
+        setTimeout(checkHealth, 60000);
+      } catch {
+        $('status').textContent = 'Server waking up';
+        setTimeout(checkHealth, 3000);
+      }
+    }
+    checkHealth();
     loadHistory();
   </script>
 </body>

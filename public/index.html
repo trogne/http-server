@@ -13,7 +13,7 @@
   <div class="reading-progress" aria-hidden="true"><i></i></div>
   <header class="site-header">
     <a class="brand" href="/" aria-label="FisoBach home">
-      <span class="brand-mark">FB</span>
+      <span class="brand-mark"><i>FB</i></span>
       <span>FisoBach <small>Counterpoint Listening Lab</small></span>
     </a>
     <nav aria-label="Primary navigation">
@@ -31,7 +31,6 @@
         <h1>Listening deeply<br>into Bach.</h1>
         <p class="lede">For 25 years, I’ve explored Bach one voice at a time—through repetition, anticipation, and attentive listening inside the polyphony.</p>
         <a class="hero-cta" href="mailto:patrick.fiset@gmail.com"><span>Connect with me</span><b>↗</b></a>
-        <div class="hero-index" aria-label="Practice at a glance"><span><b>25</b> years listening</span><span><b>01</b> voice at a time</span><span><b>∞</b> relationships</span></div>
       </div>
       <figure class="hero-image">
         <img src="/images/bach-score-study.png" alt="A musician studying a handwritten contrapuntal score by candlelight" width="1860" height="845" fetchpriority="high">
@@ -71,10 +70,7 @@
     <section id="workbench" class="studio" aria-labelledby="studio-title">
       <div class="studio-top">
         <div><p class="section-no">02 · CONTRAPUNTAL LISTENING LAB</p><h2 id="studio-title">Explore voices in relationship</h2></div>
-        <div class="notation-guide">
-          <span class="notation-help"><b>R</b> = rest (silence, not a note) · <b># / b</b> = sharp / flat · <b>/0.5 /1 /2</b> = beats</span>
-          <span id="score-status" class="score-status" aria-live="polite">Reading score…</span>
-        </div>
+        <p class="notation-help"><span>Notation guide</span><b>R</b> rest · <b># / ♭</b> accidental · <b>/0.5 /1 /2</b> beats</p>
       </div>
       <form id="analysis-form">
         <label class="sr-only" for="notes">Contrapuntal voices to analyze</label>
@@ -91,10 +87,13 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
           </div>
         </div>
         <div class="form-bar">
-          <div class="examples" aria-label="Example subjects">
-            <button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2"><strong>Fugal entries</strong><small>3 voices · staggered entries</small></button>
-            <button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2"><strong>D minor duo</strong><small>Imitative exchange</small></button>
-            <button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/2 D5/1 B4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2"><strong>Leaping duo</strong><small>Wide interval study</small></button>
+          <div class="examples" aria-labelledby="examples-title">
+            <div class="examples-intro"><strong id="examples-title">Start with an example</strong><span>Load a score, then adapt it in the editor.</span></div>
+            <div class="example-list">
+              <button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2"><strong>Fugal entries</strong><small>Three staggered voices</small><em>Load example →</em></button>
+              <button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2"><strong>D minor duo</strong><small>Imitative exchange</small><em>Load example →</em></button>
+              <button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/2 D5/1 B4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2"><strong>Leaping duo</strong><small>Wide interval study</small><em>Load example →</em></button>
+            </div>
           </div>
           <button class="analyze" type="submit"><span>Analyze subject</span><b>→</b></button>
         </div>
@@ -144,6 +143,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
 
     sampleButtons.forEach(button => button.addEventListener('click', () => {
       stopAudio(); notes.value = button.dataset.notes; syncVoices(); notes.focus();
+      button.closest('.example-list').querySelectorAll('button').forEach(item => item.classList.toggle('selected', item === button));
     }));
 
     function parseVoices() {
@@ -177,10 +177,6 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
       const voices = parseVoices(), selected = voiceSelect.value;
       voiceSelect.innerHTML = voices.map((voice,index) => `<option value="${index}">${escapeText(voice.name)}</option>`).join('');
       if (voices[selected]) voiceSelect.value = selected;
-      const events = voices.flatMap(parseEvents), rests = events.filter(event => event.rest).length;
-      const notesCount = events.length - rests;
-      const accidentals = voices.reduce((count, voice) => count + (voice.notes.match(/[A-G](?:#|b)-?\d/gi) || []).length, 0);
-      $('score-status').innerHTML = `<b>${voices.length}</b> voice${voices.length===1?'':'s'} <i>·</i> <b>${notesCount}</b> sounding notes <i>·</i> <b>${rests}</b> rest${rests===1?'':'s'} <i>·</i> <b>${accidentals}</b> accidental${accidentals===1?'':'s'}`;
       return voices;
     }
 

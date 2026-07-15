@@ -662,7 +662,8 @@ static unsigned long parse_positive_number(const char *text, unsigned long fallb
     return value;
 }
 
-static bool parse_analysis_payload(const char *body, char *notes, size_t capacity) {
+static bool parse_analysis_payload(const char *body, char *notes, size_t notes_capacity,
+                                   char *score, size_t score_capacity) {
     const char *cursor = body;
     while (*cursor && isspace((unsigned char)*cursor)) cursor++;
     if (*cursor++ != '{') return false;
@@ -670,7 +671,7 @@ static bool parse_analysis_payload(const char *body, char *notes, size_t capacit
     for (;;) {
         while (*cursor && isspace((unsigned char)*cursor)) cursor++;
         if (*cursor == '}') { cursor++; break; }
-        char key[64], value[2048];
+        char key[64], value[8192];
         if (!parse_json_string(&cursor, key, sizeof(key))) return false;
         while (*cursor && isspace((unsigned char)*cursor)) cursor++;
         if (*cursor++ != ':') return false;
@@ -678,9 +679,13 @@ static bool parse_analysis_payload(const char *body, char *notes, size_t capacit
         if (!parse_json_string(&cursor, value, sizeof(value))) return false;
         if (!strcmp(key, "notes")) {
             size_t length = strlen(value);
-            if (!length || length >= capacity || found) return false;
+            if (!length || length >= notes_capacity || found) return false;
             memcpy(notes, value, length + 1);
             found = true;
+        } else if (!strcmp(key, "score")) {
+            size_t length = strlen(value);
+            if (!length || length >= score_capacity || *score) return false;
+            memcpy(score, value, length + 1);
         }
         while (*cursor && isspace((unsigned char)*cursor)) cursor++;
         if (*cursor == ',') { cursor++; continue; }
@@ -719,14 +724,14 @@ static bool parse_note(const char *text, int *midi, unsigned int *pitch_class) {
     return true;
 }
 
-static long long save_analysis(const char *notes, const char *summary) {
+static long long save_analysis(const char *notes, const char *score, const char *summary) {
 #ifdef HAVE_LIBPQ
     if (neon_database) {
-        const char *values[] = { notes, summary };
+        const char *values[] = { notes, score, summary };
         pthread_mutex_lock(&neon_mutex);
         PGresult *result = PQexecParams(neon_database,
-            "INSERT INTO analyses(notes, summary) VALUES($1, $2::jsonb) RETURNING id",
-            2, NULL, values, NULL, NULL, 0);
+            "INSERT INTO analyses(notes, score, summary) VALUES($1, $2, $3::jsonb) RETURNING id",
+            3, NULL, values, NULL, NULL, 0);
         long long id = PQresultStatus(result) == PGRES_TUPLES_OK ? atoll(PQgetvalue(result, 0, 0)) : 0;
         PQclear(result); pthread_mutex_unlock(&neon_mutex);
         return id;
@@ -735,9 +740,10 @@ static long long save_analysis(const char *notes, const char *summary) {
     pthread_mutex_lock(&database_mutex);
     sqlite3_stmt *statement = NULL;
     bool ok = sqlite3_prepare_v2(database,
-        "INSERT INTO analyses(notes, summary) VALUES(?, ?)", -1, &statement, NULL) == SQLITE_OK &&
+        "INSERT INTO analyses(notes, score, summary) VALUES(?, ?, ?)", -1, &statement, NULL) == SQLITE_OK &&
         sqlite3_bind_text(statement, 1, notes, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-        sqlite3_bind_text(statement, 2, summary, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+        sqlite3_bind_text(statement, 2, score, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+        sqlite3_bind_text(statement, 3, summary, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
         sqlite3_step(statement) == SQLITE_DONE;
     long long id = ok ? sqlite3_last_insert_rowid(database) : 0;
     sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
@@ -754,15 +760,16 @@ static int analyses_route(int fd, http_request *request, bool keep_alive, off_t 
     if (neon_database) {
         pthread_mutex_lock(&neon_mutex);
         PGresult *result = PQexec(neon_database,
-            "SELECT id, notes, summary::text, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') "
+            "SELECT id, notes, score, summary::text, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') "
             "FROM analyses ORDER BY id DESC LIMIT 12");
         ok = ok && PQresultStatus(result) == PGRES_TUPLES_OK;
         for (int row = 0; ok && row < PQntuples(result); row++) {
             if (row) ok = append_bytes(&out, ",", 1);
             ok = ok && append_bytes(&out, "{\"id\":", 6) && append_bytes(&out, PQgetvalue(result,row,0), strlen(PQgetvalue(result,row,0))) &&
                  append_bytes(&out, ",\"notes\":", 9) && append_json_string(&out, PQgetvalue(result,row,1)) &&
-                 append_bytes(&out, ",\"summary\":", 11) && append_bytes(&out, PQgetvalue(result,row,2), strlen(PQgetvalue(result,row,2))) &&
-                 append_bytes(&out, ",\"created_at\":", 14) && append_json_string(&out, PQgetvalue(result,row,3)) && append_bytes(&out, "}", 1);
+                 append_bytes(&out, ",\"score\":", 9) && (PQgetisnull(result,row,2) ? append_bytes(&out, "null", 4) : append_json_string(&out, PQgetvalue(result,row,2))) &&
+                 append_bytes(&out, ",\"summary\":", 11) && append_bytes(&out, PQgetvalue(result,row,3), strlen(PQgetvalue(result,row,3))) &&
+                 append_bytes(&out, ",\"created_at\":", 14) && append_json_string(&out, PQgetvalue(result,row,4)) && append_bytes(&out, "}", 1);
         }
         PQclear(result); pthread_mutex_unlock(&neon_mutex);
     } else
@@ -771,7 +778,7 @@ static int analyses_route(int fd, http_request *request, bool keep_alive, off_t 
         pthread_mutex_lock(&database_mutex);
         sqlite3_stmt *statement = NULL;
         ok = ok && sqlite3_prepare_v2(database,
-            "SELECT id, notes, summary, strftime('%Y-%m-%d %H:%M', created_at) FROM analyses ORDER BY id DESC LIMIT 12",
+            "SELECT id, notes, score, summary, strftime('%Y-%m-%d %H:%M', created_at) FROM analyses ORDER BY id DESC LIMIT 12",
             -1, &statement, NULL) == SQLITE_OK;
         bool first = true;
         while (ok && sqlite3_step(statement) == SQLITE_ROW) {
@@ -780,8 +787,9 @@ static int analyses_route(int fd, http_request *request, bool keep_alive, off_t 
             char id[32]; int n = snprintf(id, sizeof(id), "%lld", sqlite3_column_int64(statement, 0));
             ok = ok && n > 0 && append_bytes(&out, "{\"id\":", 6) && append_bytes(&out, id, (size_t)n) &&
                  append_bytes(&out, ",\"notes\":", 9) && append_json_string(&out, (const char *)sqlite3_column_text(statement, 1)) &&
-                 append_bytes(&out, ",\"summary\":", 11) && append_bytes(&out, (const char *)sqlite3_column_text(statement, 2), strlen((const char *)sqlite3_column_text(statement, 2))) &&
-                 append_bytes(&out, ",\"created_at\":", 14) && append_json_string(&out, (const char *)sqlite3_column_text(statement, 3)) && append_bytes(&out, "}", 1);
+                 append_bytes(&out, ",\"score\":", 9) && (sqlite3_column_type(statement, 2) == SQLITE_NULL ? append_bytes(&out, "null", 4) : append_json_string(&out, (const char *)sqlite3_column_text(statement, 2))) &&
+                 append_bytes(&out, ",\"summary\":", 11) && append_bytes(&out, (const char *)sqlite3_column_text(statement, 3), strlen((const char *)sqlite3_column_text(statement, 3))) &&
+                 append_bytes(&out, ",\"created_at\":", 14) && append_json_string(&out, (const char *)sqlite3_column_text(statement, 4)) && append_bytes(&out, "}", 1);
         }
         sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
     }
@@ -798,8 +806,8 @@ static int analysis_route(int fd, http_request *request, bool keep_alive, off_t 
         return send_json(fd, 405, "Method Not Allowed", body, false, keep_alive,
                          "Allow: POST") ? 405 : -1;
     }
-    char notes[2048];
-    if (!request->body || !parse_analysis_payload(request->body, notes, sizeof(notes))) {
+    char notes[2048], score[8192] = {0};
+    if (!request->body || !parse_analysis_payload(request->body, notes, sizeof(notes), score, sizeof(score))) {
         const char *body = "{\"error\":\"expected JSON with a non-empty notes string\"}\n";
         *bytes = (off_t)strlen(body);
         return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
@@ -862,7 +870,7 @@ static int analysis_route(int fd, http_request *request, bool keep_alive, off_t 
     }
     ok = ok && append_bytes(&result, "]}", 2);
     if (!ok) { free(result.data); return -1; }
-    long long id = save_analysis(original_notes, result.data);
+    long long id = save_analysis(original_notes, *score ? score : original_notes, result.data);
     if (id > 0) {
         result.length--; char suffix[64]; int n = snprintf(suffix, sizeof(suffix), ",\"id\":%lld}", id);
         ok = n > 0 && append_bytes(&result, suffix, (size_t)n);
@@ -1421,12 +1429,13 @@ int main(int argc, char **argv) {
                      "CREATE TABLE IF NOT EXISTS users("
                      "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"
                      "CREATE TABLE IF NOT EXISTS analyses("
-                     "id INTEGER PRIMARY KEY AUTOINCREMENT, notes TEXT NOT NULL, summary TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+                     "id INTEGER PRIMARY KEY AUTOINCREMENT, notes TEXT NOT NULL, score TEXT, summary TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
                      NULL, NULL, NULL) != SQLITE_OK) {
         fprintf(stderr, "database: %s\n", database ? sqlite3_errmsg(database) : "could not open");
         if (database) sqlite3_close(database);
         return EXIT_FAILURE;
     }
+    (void)sqlite3_exec(database, "ALTER TABLE analyses ADD COLUMN score TEXT", NULL, NULL, NULL);
 #ifdef HAVE_LIBPQ
     const char *database_url = getenv("DATABASE_URL");
     if (database_url && *database_url) {
@@ -1438,7 +1447,8 @@ int main(int argc, char **argv) {
         }
         PGresult *migration = PQexec(neon_database,
             "CREATE TABLE IF NOT EXISTS analyses (id BIGSERIAL PRIMARY KEY, notes TEXT NOT NULL, "
-            "summary JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+            "score TEXT, summary JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());"
+            "ALTER TABLE analyses ADD COLUMN IF NOT EXISTS score TEXT");
         if (PQresultStatus(migration) != PGRES_COMMAND_OK) {
             fprintf(stderr, "Neon migration failed: %s", PQerrorMessage(neon_database));
             PQclear(migration); PQfinish(neon_database); neon_database = NULL;

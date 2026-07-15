@@ -81,8 +81,8 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
           <label>Focus voice<select id="voice-select" aria-label="Voice to emphasize"></select></label>
           <label>Tempo<input id="tempo" type="range" min="45" max="160" value="82"><output id="tempo-value">82 BPM</output></label>
           <div class="transport" aria-label="Playback controls">
-            <button id="play-texture" type="button">▶ Full texture</button>
-            <button id="play-focus" type="button">◎ Focus voice</button>
+            <button id="play-texture" type="button" aria-pressed="false">▶ Full texture</button>
+            <button id="play-focus" type="button" aria-pressed="false">◎ Focus voice</button>
             <button id="stop-audio" type="button">■ Stop</button>
           </div>
         </div>
@@ -136,7 +136,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
     const form = $('analysis-form'), notes = $('notes'), error = $('error'), results = $('results');
     const voiceSelect = $('voice-select'), tempo = $('tempo');
     const sampleButtons = document.querySelectorAll('[data-notes]');
-    let audioContext, activeSources = [];
+    let audioContext, activeSources = [], playbackTimer;
 
     sampleButtons.forEach(button => button.addEventListener('click', () => {
       stopAudio(); notes.value = button.dataset.notes; syncVoices(); notes.focus();
@@ -195,7 +195,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
       const lines = sounded.map((events, voiceIndex) => {
         const points=events.map(point), color=colors[voiceIndex%colors.length], delay=voiceIndex*.12;
         return `<g class="texture-voice" style="--voice:${color};--delay:${delay}s"><polyline class="texture-line" pathLength="1" points="${points.map(p=>`${p.x},${p.y}`).join(' ')}"/>` +
-          points.map((p,index)=>`<circle class="texture-point" style="--point-delay:${delay+index*.018}s" cx="${p.x}" cy="${p.y}" r="3.5"/>`).join('') + '</g>';
+          points.map((p,index)=>`<circle class="texture-point" style="--point-delay:${delay+index*.018}s" cx="${p.x}" cy="${p.y}" r="3.5"><title>${escapeText(voices[voiceIndex].name)} · ${escapeText(events[index].note)} · beat ${events[index].start+1}</title></circle>`).join('') + '</g>';
       }).join('');
       svg.innerHTML = `<g class="grid vertical">${verticalGrid}</g><g class="grid">${horizontalGrid}</g>${lines}`;
       svg.setAttribute('aria-label', `${voices.length} contrapuntal voices shown with equal emphasis across ${totalBeats} beats`);
@@ -210,6 +210,8 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
     function stopAudio() {
       activeSources.forEach(source => { try { source.stop(); } catch {} });
       activeSources = [];
+      clearTimeout(playbackTimer);
+      document.querySelectorAll('.transport button').forEach(button => { button.classList.remove('playing'); button.setAttribute('aria-pressed', 'false'); });
     }
 
     async function playVoices(focusOnly = false) {
@@ -219,6 +221,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
       audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
       await audioContext.resume();
       const beat = 60 / Number(tempo.value), start = audioContext.currentTime + .08;
+      let latestRelease = start;
       voices.forEach((voice, voiceIndex) => {
         if (focusOnly && voiceIndex !== selected) return;
         parseEvents(voice).forEach(event => {
@@ -227,6 +230,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
           oscillator.type = ['triangle','sine','sawtooth'][voiceIndex % 3];
           oscillator.frequency.value = 440 * Math.pow(2, (event.midi - 69) / 12);
           const onset = start + event.start * beat, release = onset + event.duration * beat * .92;
+          latestRelease = Math.max(latestRelease, release);
           const level = focusOnly || voiceIndex === selected ? .105 : .026;
           gain.gain.setValueAtTime(.0001, onset);
           gain.gain.exponentialRampToValueAtTime(level, onset + .025);
@@ -236,6 +240,9 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
           oscillator.start(onset); oscillator.stop(release + .02); activeSources.push(oscillator);
         });
       });
+      const activeButton = $(focusOnly ? 'play-focus' : 'play-texture');
+      activeButton.classList.add('playing'); activeButton.setAttribute('aria-pressed', 'true');
+      playbackTimer = setTimeout(stopAudio, Math.max(0, latestRelease-audioContext.currentTime+.12)*1000);
     }
 
     function describeTexture() {
@@ -292,7 +299,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
         if (!focus) throw new Error('Enter at least one voice using “Name: C4 D4 E4”.');
         const focusNotes = parseEvents(focus).filter(event => !event.rest).map(event => event.note).join(' ');
         if (!focusNotes) throw new Error('The focus voice needs at least one sounding note.');
-        const response = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes:focusNotes}) });
+        const response = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes:focusNotes, score:notes.value}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Analysis failed');
         renderAnalysis(data); await loadHistory();
@@ -307,9 +314,15 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
         const response = await fetch('/api/analyses', {cache:'no-store'}); const data = await response.json();
         if (!response.ok) throw new Error();
         if (!data.analyses.length) { history.innerHTML = '<p class="empty">Your analyzed subjects will appear here.</p>'; return; }
-        history.innerHTML = data.analyses.map(item => `<button class="history-item" type="button" data-notes="${escapeText(item.notes)}"><span class="history-id">${String(item.id).padStart(3,'0')}</span><span><strong>${escapeText(item.notes)}</strong><small>${item.created_at} UTC · ${item.summary.note_count} notes · ${item.summary.range_semitones} semitones</small></span><b>Revisit →</b></button>`).join('');
-        history.querySelectorAll('[data-notes]').forEach(item => item.addEventListener('click', () => {
-          notes.value = `Voice I: ${item.dataset.notes}`;
+        history.innerHTML = data.analyses.map(item => {
+          const score = item.score || `Voice I: ${item.notes}`;
+          const voiceNames = score.split(/\n+/).map(line => line.match(/^([^:]+):/)?.[1].trim()).filter(Boolean);
+          const title = voiceNames.length > 1 ? voiceNames.join(' · ') : item.notes;
+          return `<button class="history-item" type="button"><span class="history-id">${String(item.id).padStart(3,'0')}</span><span><strong>${escapeText(title)}</strong><small>${item.created_at} UTC · ${voiceNames.length || 1} voice${voiceNames.length===1?'':'s'} · ${item.summary.note_count} focus notes · ${item.summary.range_semitones} semitones</small></span><b>Revisit score →</b></button>`;
+        }).join('');
+        history.querySelectorAll('.history-item').forEach((element, index) => element.addEventListener('click', () => {
+          const item = data.analyses[index];
+          notes.value = item.score || `Voice I: ${item.notes}`;
           syncVoices();
           $('workbench').scrollIntoView({behavior:'smooth', block:'start'});
           notes.focus({preventScroll:true});

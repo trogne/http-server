@@ -139,7 +139,9 @@ def main():
                 b"HTTP/1.1 400"
             )
 
-            status, _, body = json_request(port, "POST", "/api/analyze", b'{"notes":"C4 D4 E4 F4 E4 D4 C4"}')
+            full_score = "Voice I: C4 D4 E4 F4 E4 D4 C4\nVoice II: R/2 G3 A3 B3 C4"
+            analysis_payload = json.dumps({"notes": "C4 D4 E4 F4 E4 D4 C4", "score": full_score}).encode()
+            status, _, body = json_request(port, "POST", "/api/analyze", analysis_payload)
             analysis = json.loads(body)
             assert status == 200 and analysis["note_count"] == 7
             assert analysis["range_semitones"] == 5 and analysis["contour"] == "balanced"
@@ -150,6 +152,7 @@ def main():
             archive = json.loads(body)
             assert status == 200 and archive["analyses"][0]["id"] == analysis["id"]
             assert archive["analyses"][0]["summary"]["note_count"] == 7
+            assert archive["analyses"][0]["score"] == full_score
             status, _, body = json_request(port, "POST", "/api/analyze", b'{"notes":"C4 C#4 Db4 D4"}')
             accidentals = json.loads(body)
             assert status == 200 and accidentals["midi"] == [60, 61, 61, 62]

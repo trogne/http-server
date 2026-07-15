@@ -25,7 +25,7 @@ the resource limits appropriate to your environment.
 - SQLite-backed notes example at `/notes`
 - SQLite-backed JSON Users API at `/users`, with CRUD, search, sorting, and pagination
 - Bach-themed structural melodic analysis at `POST /api/analyze`
-- Persistent analysis archive at `GET /api/analyses`
+- Persistent full-score analysis archive at `GET /api/analyses`, including every contrapuntal voice
 - Neon PostgreSQL persistence in production with an automatic SQLite fallback locally
 - A raw TCP protocol client (`tcp_client`)
 

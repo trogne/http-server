@@ -12,7 +12,7 @@
   <header class="site-header">
     <a class="brand" href="/" aria-label="FisoBach home">
       <span class="brand-mark">FB</span>
-      <span>FisoBach <small>Melodic Intelligence</small></span>
+      <span>FisoBach <small>Counterpoint Listening Lab</small></span>
     </a>
     <nav aria-label="Primary navigation">
       <a href="#method">The method</a>
@@ -67,13 +67,13 @@
     <section id="workbench" class="studio" aria-labelledby="studio-title">
       <div class="studio-top">
         <div><p class="section-no">02 · CONTRAPUNTAL LISTENING LAB</p><h2 id="studio-title">Explore voices in relationship</h2></div>
-        <span class="notation-help">One labeled voice per line · scientific pitch notation</span>
+        <span class="notation-help">Use R for rests · /0.5, /1, /2 for beat duration</span>
       </div>
       <form id="analysis-form">
         <label class="sr-only" for="notes">Contrapuntal voices to analyze</label>
-        <textarea id="notes" rows="5" spellcheck="false" placeholder="Soprano: C5 D5 E5…&#10;Alto: G4 A4 G4…&#10;Bass: C3 F3 E3…">Soprano: E5 F5 G5 A5 G5 F5 E5 D5 C5
-Alto: C5 D5 E5 F5 E5 D5 C5 B4 C5
-Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
+        <textarea id="notes" rows="5" spellcheck="false" placeholder="Voice I: D5/1 E5/0.5 F5/0.5…&#10;Voice II: R/2 D4/1 E4/1…">Voice I: D5/1 A5/0.5 F5/0.5 G5/1 E5/1 F5/0.5 D5/0.5 E5/1 C#5/1 D5/2
+Voice II: R/2 D4/1 A4/0.5 F4/0.5 G4/1 E4/1 F4/0.5 D4/0.5 E4/1 C#4/1 D4/2
+Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
         <div class="voice-console">
           <label>Focus voice<select id="voice-select" aria-label="Voice to emphasize"></select></label>
           <label>Tempo<input id="tempo" type="range" min="45" max="160" value="82"><output id="tempo-value">82 BPM</output></label>
@@ -85,9 +85,9 @@ Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
         </div>
         <div class="form-bar">
           <div class="examples" aria-label="Example subjects">
-            <button type="button" data-notes="Soprano: E5 F5 G5 A5 G5 F5 E5 D5 C5&#10;Alto: C5 D5 E5 F5 E5 D5 C5 B4 C5&#10;Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3">Three voices</button>
-            <button type="button" data-notes="Voice I: D5 F5 A5 C6 B5 G5 E5 C#5 D5&#10;Voice II: A4 D5 C5 F5 E5 D5 C#5 A4 D5">D minor duo</button>
-            <button type="button" data-notes="Upper: C5 G5 E5 A5 F5 D5 B4 C5&#10;Lower: C4 E4 G4 F4 A4 B4 G4 C5">Leaping duo</button>
+            <button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2">Fugal entries</button>
+            <button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2">D minor duo</button>
+            <button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/2 D5/1 B4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2">Leaping duo</button>
           </div>
           <button class="analyze" type="submit"><span>Analyze subject</span><b>→</b></button>
         </div>
@@ -154,6 +154,18 @@ Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
       return (Number(match[3]) + 1) * 12 + base + (match[2] === '#' ? 1 : match[2] === 'b' ? -1 : 0);
     }
 
+    function parseEvents(voice) {
+      let cursor = 0;
+      return voice.notes.split(/[\s,]+/).map(token => {
+        const parts = token.split('/'), duration = Number(parts[1] || 1);
+        if (!Number.isFinite(duration) || duration <= 0 || duration > 16) return null;
+        const rest = parts[0].toUpperCase() === 'R', midi = rest ? null : noteToMidi(parts[0]);
+        if (!rest && !Number.isFinite(midi)) return null;
+        const event = {note:parts[0], midi, start:cursor, duration, rest}; cursor += duration;
+        return event;
+      }).filter(Boolean);
+    }
+
     function syncVoices() {
       const voices = parseVoices(), selected = voiceSelect.value;
       voiceSelect.innerHTML = voices.map((voice,index) => `<option value="${index}">${escapeText(voice.name)}</option>`).join('');
@@ -163,17 +175,18 @@ Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
 
     function renderTexture() {
       const voices = parseVoices(), selected = Number(voiceSelect.value || 0);
-      const series = voices.map(voice => voice.notes.split(/[\s,]+/).map(noteToMidi).filter(Number.isFinite));
-      const all = series.flat(); if (!all.length) return;
+      const timelines = voices.map(parseEvents);
+      const sounded = timelines.map(events => events.filter(event => !event.rest));
+      const all = sounded.flat().map(event => event.midi); if (!all.length) return;
       const svg = $('contour'), width = 760, height = 250, pad = 32;
       const min = Math.min(...all), max = Math.max(...all), span = Math.max(max - min, 1);
-      const maxLength = Math.max(...series.map(values => values.length));
-      const point = (value, index) => ({x:pad+index*(width-pad*2)/Math.max(maxLength-1,1), y:height-pad-(value-min)*(height-pad*2)/span});
+      const totalBeats = Math.max(...timelines.flat().map(event => event.start + event.duration));
+      const point = event => ({x:pad+event.start*(width-pad*2)/Math.max(totalBeats,1), y:height-pad-(event.midi-min)*(height-pad*2)/span});
       const colors = ['#caa45d','#91a8a0','#a68ca8','#a98772','#8296b0'];
-      const order = series.map((_,i)=>i).sort((a,b)=>(a===selected)-(b===selected));
+      const order = sounded.map((_,i)=>i).sort((a,b)=>(a===selected)-(b===selected));
       const grid = [0,1,2,3].map(i => `<line x1="${pad}" y1="${pad+i*(height-pad*2)/3}" x2="${width-pad}" y2="${pad+i*(height-pad*2)/3}"/>`).join('');
       const lines = order.map(voiceIndex => {
-        const points=series[voiceIndex].map(point), focus=voiceIndex===selected, color=colors[voiceIndex%colors.length];
+        const points=sounded[voiceIndex].map(point), focus=voiceIndex===selected, color=colors[voiceIndex%colors.length];
         return `<polyline class="texture-line ${focus?'focus':''}" style="--voice:${color}" points="${points.map(p=>`${p.x},${p.y}`).join(' ')}"/>` +
           points.map(p=>`<circle class="texture-point ${focus?'focus':''}" style="--voice:${color}" cx="${p.x}" cy="${p.y}" r="${focus?4.5:3}"/>`).join('');
       }).join('');
@@ -200,12 +213,12 @@ Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
       const beat = 60 / Number(tempo.value), start = audioContext.currentTime + .08;
       voices.forEach((voice, voiceIndex) => {
         if (focusOnly && voiceIndex !== selected) return;
-        voice.notes.split(/[\s,]+/).forEach((note, noteIndex) => {
-          const midi = noteToMidi(note); if (!Number.isFinite(midi)) return;
+        parseEvents(voice).forEach(event => {
+          if (event.rest) return;
           const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
           oscillator.type = ['triangle','sine','sawtooth'][voiceIndex % 3];
-          oscillator.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
-          const onset = start + noteIndex * beat, release = onset + beat * .88;
+          oscillator.frequency.value = 440 * Math.pow(2, (event.midi - 69) / 12);
+          const onset = start + event.start * beat, release = onset + event.duration * beat * .92;
           const level = focusOnly || voiceIndex === selected ? .105 : .026;
           gain.gain.setValueAtTime(.0001, onset);
           gain.gain.exponentialRampToValueAtTime(level, onset + .025);
@@ -219,16 +232,21 @@ Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
 
     function describeTexture() {
       const voices = parseVoices();
-      const rows = voices.map(voice => voice.notes.split(/[\s,]+/).map(noteToMidi).filter(Number.isFinite));
+      const rows = voices.map(parseEvents);
       let contrary = 0, similar = 0, oblique = 0, consonant = 0, sonorities = 0;
       for (let v = 0; v < rows.length - 1; v++) {
-        const length = Math.min(rows[v].length, rows[v+1].length);
-        for (let i = 0; i < length; i++) {
-          if ([0,3,4,5,7,8,9].includes(Math.abs(rows[v][i]-rows[v+1][i])%12)) consonant++;
+        const end = Math.max(...rows[v].concat(rows[v+1]).map(event => event.start + event.duration));
+        let previousA = null, previousB = null;
+        for (let time = 0; time < end; time += .5) {
+          const eventA=rows[v].find(event=>!event.rest && time>=event.start && time<event.start+event.duration);
+          const eventB=rows[v+1].find(event=>!event.rest && time>=event.start && time<event.start+event.duration);
+          if (!eventA || !eventB) { previousA=null; previousB=null; continue; }
+          if ([0,3,4,5,7,8,9].includes(Math.abs(eventA.midi-eventB.midi)%12)) consonant++;
           sonorities++;
-          if (!i) continue;
-          const a=Math.sign(rows[v][i]-rows[v][i-1]), b=Math.sign(rows[v+1][i]-rows[v+1][i-1]);
+          if (previousA === null) { previousA=eventA.midi; previousB=eventB.midi; continue; }
+          const a=Math.sign(eventA.midi-previousA), b=Math.sign(eventB.midi-previousB);
           if (!a || !b) oblique++; else if (a===b) similar++; else contrary++;
+          previousA=eventA.midi; previousB=eventB.midi;
         }
       }
       if (voices.length < 2) return 'Add another labeled voice to reveal contrapuntal relationships.';
@@ -264,7 +282,9 @@ Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
       try {
         const voices = syncVoices(), focus = voices[Number(voiceSelect.value || 0)];
         if (!focus) throw new Error('Enter at least one voice using “Name: C4 D4 E4”.');
-        const response = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes:focus.notes}) });
+        const focusNotes = parseEvents(focus).filter(event => !event.rest).map(event => event.note).join(' ');
+        if (!focusNotes) throw new Error('The focus voice needs at least one sounding note.');
+        const response = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes:focusNotes}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Analysis failed');
         renderAnalysis(data); await loadHistory();

@@ -356,14 +356,6 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
     syncVoices();
     loadHistory();
 
-    if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      document.documentElement.classList.add('reveal-ready');
-      const revealObserver = new IntersectionObserver(entries => entries.forEach(entry => {
-        if (entry.isIntersecting) { entry.target.classList.add('revealed'); revealObserver.unobserve(entry.target); }
-      }), {threshold:.12, rootMargin:'0px 0px -6%'});
-      document.querySelectorAll('.method-intro,.method-story,.method-image,.practice-steps,.method-result,.invitation>*,.studio-top,#analysis-form,.results>*,.archive>*').forEach(element => revealObserver.observe(element));
-    }
-
     if ('IntersectionObserver' in window) {
       const navLinks = [...document.querySelectorAll('nav a[href^="#"]')];
       const navObserver = new IntersectionObserver(entries => entries.forEach(entry => {

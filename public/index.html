@@ -67,7 +67,10 @@
     <section id="workbench" class="studio" aria-labelledby="studio-title">
       <div class="studio-top">
         <div><p class="section-no">02 · CONTRAPUNTAL LISTENING LAB</p><h2 id="studio-title">Explore voices in relationship</h2></div>
-        <span class="notation-help">Use R for rests · /0.5, /1, /2 for beat duration</span>
+        <div class="notation-guide">
+          <span class="notation-help"><b>R</b> = rest (silence, not a note) · <b># / b</b> = sharp / flat · <b>/0.5 /1 /2</b> = beats</span>
+          <span id="score-status" class="score-status" aria-live="polite">Reading score…</span>
+        </div>
       </div>
       <form id="analysis-form">
         <label class="sr-only" for="notes">Contrapuntal voices to analyze</label>
@@ -85,9 +88,9 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
         </div>
         <div class="form-bar">
           <div class="examples" aria-label="Example subjects">
-            <button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2">Fugal entries</button>
-            <button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2">D minor duo</button>
-            <button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/2 D5/1 B4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2">Leaping duo</button>
+            <button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 Eb5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 Bb4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 Bb2/2 D3/2"><strong>Fugal entries</strong><small>3 voices · C# + Eb</small></button>
+            <button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F#5/0.5 E5/1 Eb5/1&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 Bb4/1 C#5/1 B4/2"><strong>D minor duo</strong><small>Chromatic exchange</small></button>
+            <button type="button" data-notes="Upper: C5/1 G5/0.5 Eb5/0.5 A5/1 F#5/2 D5/1 Bb4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 Ab4/1 F4/0.5 A4/0.5 B4/2 G#4/1 C5/2"><strong>Leaping duo</strong><small>Wide color · # + b</small></button>
           </div>
           <button class="analyze" type="submit"><span>Analyze subject</span><b>→</b></button>
         </div>
@@ -170,6 +173,10 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
       const voices = parseVoices(), selected = voiceSelect.value;
       voiceSelect.innerHTML = voices.map((voice,index) => `<option value="${index}">${escapeText(voice.name)}</option>`).join('');
       if (voices[selected]) voiceSelect.value = selected;
+      const events = voices.flatMap(parseEvents), rests = events.filter(event => event.rest).length;
+      const notesCount = events.length - rests;
+      const accidentals = voices.reduce((count, voice) => count + (voice.notes.match(/[A-G](?:#|b)-?\d/gi) || []).length, 0);
+      $('score-status').innerHTML = `<b>${voices.length}</b> voice${voices.length===1?'':'s'} <i>·</i> <b>${notesCount}</b> sounding notes <i>·</i> <b>${rests}</b> rest${rests===1?'':'s'} <i>·</i> <b>${accidentals}</b> accidental${accidentals===1?'':'s'}`;
       return voices;
     }
 
@@ -312,6 +319,9 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
 
     $('refresh').addEventListener('click', loadHistory);
     notes.addEventListener('input', syncVoices);
+    notes.addEventListener('keydown', event => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') form.requestSubmit();
+    });
     voiceSelect.addEventListener('change', () => { stopAudio(); if (!results.classList.contains('hidden')) renderTexture(); });
     tempo.addEventListener('input', () => { $('tempo-value').textContent = `${tempo.value} BPM`; });
     $('play-texture').addEventListener('click', () => playVoices(false));

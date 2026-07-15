@@ -150,6 +150,10 @@ def main():
             archive = json.loads(body)
             assert status == 200 and archive["analyses"][0]["id"] == analysis["id"]
             assert archive["analyses"][0]["summary"]["note_count"] == 7
+            status, _, body = json_request(port, "POST", "/api/analyze", b'{"notes":"C4 C#4 Db4 D4"}')
+            accidentals = json.loads(body)
+            assert status == 200 and accidentals["midi"] == [60, 61, 61, 62]
+            assert accidentals["distinct_pitch_classes"] == 3
             assert json_request(port, "POST", "/api/analyze", b'{"notes":"C4 nope G4"}')[0] == 400
             assert request(port, "GET", "/api/analyze")[0] == 405
 

@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <div class="reading-progress" aria-hidden="true"><i></i></div>
   <header class="site-header">
     <a class="brand" href="/" aria-label="FisoBach home">
       <span class="brand-mark">FB</span>
@@ -17,17 +19,19 @@
     <nav aria-label="Primary navigation">
       <a href="#method">The method</a>
       <a href="#workbench">Workbench</a>
+      <a href="#archive">Archive</a>
       <a class="nav-contact" href="mailto:patrick.fiset@gmail.com">Connect</a>
     </nav>
   </header>
 
-  <main>
+  <main id="content">
     <section class="hero">
-      <div>
+      <div class="hero-copy">
         <p class="eyebrow">AN OPEN INVITATION · PATRICK FISET</p>
         <h1>Listening deeply<br>into Bach.</h1>
         <p class="lede">For 25 years, I’ve explored Bach one voice at a time—through repetition, anticipation, and attentive listening inside the polyphony.</p>
         <a class="hero-cta" href="mailto:patrick.fiset@gmail.com"><span>Connect with me</span><b>↗</b></a>
+        <div class="hero-index" aria-label="Practice at a glance"><span><b>25</b> years listening</span><span><b>01</b> voice at a time</span><span><b>∞</b> relationships</span></div>
       </div>
       <figure class="hero-image">
         <img src="/images/bach-score-study.png" alt="A musician studying a handwritten contrapuntal score by candlelight" width="1860" height="845" fetchpriority="high">
@@ -123,7 +127,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
       <article class="insight"><span class="ornament">𝄞</span><div><p>ANALYST'S NOTE</p><h3 id="insight-title">A balanced melodic design</h3><p id="insight-copy"></p></div></article>
     </section>
 
-    <section class="archive" aria-labelledby="archive-title">
+    <section id="archive" class="archive" aria-labelledby="archive-title">
       <div class="section-heading"><div><p class="section-no">04 · ARCHIVE</p><h2 id="archive-title">Research timeline</h2></div><button id="refresh" class="text-button" type="button">Refresh archive ↻</button></div>
       <div id="history" class="history"><p class="empty">Your analyzed subjects will appear here.</p></div>
     </section>
@@ -363,7 +367,22 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
         navLinks.forEach(link => link.toggleAttribute('aria-current', link.getAttribute('href') === `#${entry.target.id}`));
       }), {rootMargin:'-25% 0px -65%'});
       navLinks.forEach(link => { const section = document.querySelector(link.getAttribute('href')); if (section) navObserver.observe(section); });
+
+      const revealObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+        if (entry.isIntersecting) { entry.target.classList.add('is-visible'); revealObserver.unobserve(entry.target); }
+      }), {rootMargin:'0px 0px -8%', threshold:.08});
+      document.querySelectorAll('.method-intro,.method-story,.method-image,.practice-steps,.method-result,.invitation>*,.studio-top,#analysis-form,.section-heading,.metric-grid,.analysis-grid,.insight,.history').forEach(element => {
+        element.classList.add('reveal'); revealObserver.observe(element);
+      });
     }
+
+    const progressBar = document.querySelector('.reading-progress i');
+    const updateProgress = () => {
+      const distance = document.documentElement.scrollHeight - innerHeight;
+      progressBar.style.transform = `scaleX(${distance > 0 ? Math.min(scrollY / distance, 1) : 0})`;
+    };
+    addEventListener('scroll', updateProgress, {passive:true});
+    addEventListener('resize', updateProgress); updateProgress();
   </script>
 </body>
 </html>

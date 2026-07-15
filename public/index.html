@@ -66,17 +66,28 @@
 
     <section id="workbench" class="studio" aria-labelledby="studio-title">
       <div class="studio-top">
-        <div><p class="section-no">02 · DIGITAL WORKBENCH</p><h2 id="studio-title">Explore a melodic voice</h2></div>
-        <span class="notation-help">Scientific pitch notation · e.g. C4 F#4 Bb3</span>
+        <div><p class="section-no">02 · CONTRAPUNTAL LISTENING LAB</p><h2 id="studio-title">Explore voices in relationship</h2></div>
+        <span class="notation-help">One labeled voice per line · scientific pitch notation</span>
       </div>
       <form id="analysis-form">
-        <label class="sr-only" for="notes">Notes to analyze</label>
-        <textarea id="notes" rows="3" spellcheck="false" placeholder="Enter a melodic subject…">C4 D4 E4 F4 G4 A4 G4 F4 E4 D4 C4</textarea>
+        <label class="sr-only" for="notes">Contrapuntal voices to analyze</label>
+        <textarea id="notes" rows="5" spellcheck="false" placeholder="Soprano: C5 D5 E5…&#10;Alto: G4 A4 G4…&#10;Bass: C3 F3 E3…">Soprano: E5 F5 G5 A5 G5 F5 E5 D5 C5
+Alto: C5 D5 E5 F5 E5 D5 C5 B4 C5
+Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3</textarea>
+        <div class="voice-console">
+          <label>Focus voice<select id="voice-select" aria-label="Voice to emphasize"></select></label>
+          <label>Tempo<input id="tempo" type="range" min="45" max="160" value="82"><output id="tempo-value">82 BPM</output></label>
+          <div class="transport" aria-label="Playback controls">
+            <button id="play-texture" type="button">▶ Full texture</button>
+            <button id="play-focus" type="button">◎ Focus voice</button>
+            <button id="stop-audio" type="button">■ Stop</button>
+          </div>
+        </div>
         <div class="form-bar">
           <div class="examples" aria-label="Example subjects">
-            <button type="button" data-notes="C4 D4 E4 F4 G4 A4 G4 F4 E4 D4 C4">Arch</button>
-            <button type="button" data-notes="D4 F4 A4 C5 B4 G4 E4 C#4 D4">D minor</button>
-            <button type="button" data-notes="C4 G4 E4 A4 F4 D4 B3 C4">Leaping</button>
+            <button type="button" data-notes="Soprano: E5 F5 G5 A5 G5 F5 E5 D5 C5&#10;Alto: C5 D5 E5 F5 E5 D5 C5 B4 C5&#10;Bass: C3 G3 C4 F3 C4 G3 A3 G3 C3">Three voices</button>
+            <button type="button" data-notes="Voice I: D5 F5 A5 C6 B5 G5 E5 C#5 D5&#10;Voice II: A4 D5 C5 F5 E5 D5 C#5 A4 D5">D minor duo</button>
+            <button type="button" data-notes="Upper: C5 G5 E5 A5 F5 D5 B4 C5&#10;Lower: C4 E4 G4 F4 A4 B4 G4 C5">Leaping duo</button>
           </div>
           <button class="analyze" type="submit"><span>Analyze subject</span><b>→</b></button>
         </div>
@@ -94,8 +105,9 @@
       </div>
       <div class="analysis-grid">
         <article class="chart-card">
-          <div class="card-title"><div><span>MELODIC CONTOUR</span><strong id="contour-label">—</strong></div><span id="climax-label">Climax —</span></div>
-          <svg id="contour" viewBox="0 0 760 250" role="img" aria-label="Melodic contour chart"></svg>
+          <div class="card-title"><div><span>CONTRAPUNTAL TEXTURE</span><strong id="contour-label">—</strong></div><span id="climax-label">Climax —</span></div>
+          <div id="voice-legend" class="voice-legend"></div>
+          <svg id="contour" viewBox="0 0 760 250" role="img" aria-label="Combined contour chart with the selected voice emphasized"></svg>
         </article>
         <article class="motion-card">
           <div class="card-title"><div><span>INTERVAL CHARACTER</span><strong>Motion profile</strong></div></div>
@@ -119,27 +131,54 @@
   <script>
     const $ = id => document.getElementById(id);
     const form = $('analysis-form'), notes = $('notes'), error = $('error'), results = $('results');
+    const voiceSelect = $('voice-select'), tempo = $('tempo');
     const sampleButtons = document.querySelectorAll('[data-notes]');
+    let audioContext, activeSources = [];
 
     sampleButtons.forEach(button => button.addEventListener('click', () => {
-      notes.value = button.dataset.notes; notes.focus();
+      stopAudio(); notes.value = button.dataset.notes; syncVoices(); notes.focus();
     }));
 
-    function renderContour(values) {
+    function parseVoices() {
+      return notes.value.split(/\n+/).map((line, index) => {
+        const match = line.trim().match(/^([^:]+):\s*(.+)$/);
+        return match ? {name:match[1].trim(), notes:match[2].trim()} :
+          line.trim() ? {name:`Voice ${index + 1}`, notes:line.trim()} : null;
+      }).filter(Boolean);
+    }
+
+    function noteToMidi(note) {
+      const match = note.match(/^([A-Ga-g])([#b]?)(-?\d)$/);
+      if (!match) return NaN;
+      const base = {C:0,D:2,E:4,F:5,G:7,A:9,B:11}[match[1].toUpperCase()];
+      return (Number(match[3]) + 1) * 12 + base + (match[2] === '#' ? 1 : match[2] === 'b' ? -1 : 0);
+    }
+
+    function syncVoices() {
+      const voices = parseVoices(), selected = voiceSelect.value;
+      voiceSelect.innerHTML = voices.map((voice,index) => `<option value="${index}">${escapeText(voice.name)}</option>`).join('');
+      if (voices[selected]) voiceSelect.value = selected;
+      return voices;
+    }
+
+    function renderTexture() {
+      const voices = parseVoices(), selected = Number(voiceSelect.value || 0);
+      const series = voices.map(voice => voice.notes.split(/[\s,]+/).map(noteToMidi).filter(Number.isFinite));
+      const all = series.flat(); if (!all.length) return;
       const svg = $('contour'), width = 760, height = 250, pad = 32;
-      const min = Math.min(...values), max = Math.max(...values), span = Math.max(max - min, 1);
-      const point = (value, index) => ({
-        x: pad + index * (width - pad * 2) / Math.max(values.length - 1, 1),
-        y: height - pad - (value - min) * (height - pad * 2) / span
-      });
-      const points = values.map(point);
-      const line = points.map(p => `${p.x},${p.y}`).join(' ');
-      const area = `${pad},${height-pad} ${line} ${width-pad},${height-pad}`;
-      svg.innerHTML = `
-        <defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#caa45d" stop-opacity=".35"/><stop offset="1" stop-color="#caa45d" stop-opacity="0"/></linearGradient></defs>
-        <g class="grid">${[0,1,2,3].map(i => `<line x1="${pad}" y1="${pad+i*(height-pad*2)/3}" x2="${width-pad}" y2="${pad+i*(height-pad*2)/3}"/>`).join('')}</g>
-        <polygon points="${area}" fill="url(#fill)"/><polyline class="contour-line" points="${line}"/>
-        ${points.map((p,i) => `<circle class="note-point ${values[i]===max?'climax':''}" cx="${p.x}" cy="${p.y}" r="${values[i]===max?6:4}"/>`).join('')}`;
+      const min = Math.min(...all), max = Math.max(...all), span = Math.max(max - min, 1);
+      const maxLength = Math.max(...series.map(values => values.length));
+      const point = (value, index) => ({x:pad+index*(width-pad*2)/Math.max(maxLength-1,1), y:height-pad-(value-min)*(height-pad*2)/span});
+      const colors = ['#caa45d','#91a8a0','#a68ca8','#a98772','#8296b0'];
+      const order = series.map((_,i)=>i).sort((a,b)=>(a===selected)-(b===selected));
+      const grid = [0,1,2,3].map(i => `<line x1="${pad}" y1="${pad+i*(height-pad*2)/3}" x2="${width-pad}" y2="${pad+i*(height-pad*2)/3}"/>`).join('');
+      const lines = order.map(voiceIndex => {
+        const points=series[voiceIndex].map(point), focus=voiceIndex===selected, color=colors[voiceIndex%colors.length];
+        return `<polyline class="texture-line ${focus?'focus':''}" style="--voice:${color}" points="${points.map(p=>`${p.x},${p.y}`).join(' ')}"/>` +
+          points.map(p=>`<circle class="texture-point ${focus?'focus':''}" style="--voice:${color}" cx="${p.x}" cy="${p.y}" r="${focus?4.5:3}"/>`).join('');
+      }).join('');
+      svg.innerHTML = `<g class="grid">${grid}</g>${lines}`;
+      $('voice-legend').innerHTML = voices.map((voice,index) => `<span class="${index===selected?'focus':''}"><i style="--voice:${colors[index%colors.length]}"></i>${escapeText(voice.name)}</span>`).join('');
     }
 
     function setBar(id, count, total) {
@@ -147,21 +186,72 @@
       $(id+'-value').textContent = count;
     }
 
+    function stopAudio() {
+      activeSources.forEach(source => { try { source.stop(); } catch {} });
+      activeSources = [];
+    }
+
+    async function playVoices(focusOnly = false) {
+      stopAudio(); error.textContent = '';
+      const voices = parseVoices(), selected = Number(voiceSelect.value || 0);
+      if (!voices.length) { error.textContent = 'Enter at least one labeled voice.'; return; }
+      audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+      await audioContext.resume();
+      const beat = 60 / Number(tempo.value), start = audioContext.currentTime + .08;
+      voices.forEach((voice, voiceIndex) => {
+        if (focusOnly && voiceIndex !== selected) return;
+        voice.notes.split(/[\s,]+/).forEach((note, noteIndex) => {
+          const midi = noteToMidi(note); if (!Number.isFinite(midi)) return;
+          const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
+          oscillator.type = ['triangle','sine','sawtooth'][voiceIndex % 3];
+          oscillator.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+          const onset = start + noteIndex * beat, release = onset + beat * .88;
+          const level = focusOnly || voiceIndex === selected ? .105 : .026;
+          gain.gain.setValueAtTime(.0001, onset);
+          gain.gain.exponentialRampToValueAtTime(level, onset + .025);
+          gain.gain.setValueAtTime(level, Math.max(onset + .03, release - .08));
+          gain.gain.exponentialRampToValueAtTime(.0001, release);
+          oscillator.connect(gain).connect(audioContext.destination);
+          oscillator.start(onset); oscillator.stop(release + .02); activeSources.push(oscillator);
+        });
+      });
+    }
+
+    function describeTexture() {
+      const voices = parseVoices();
+      const rows = voices.map(voice => voice.notes.split(/[\s,]+/).map(noteToMidi).filter(Number.isFinite));
+      let contrary = 0, similar = 0, oblique = 0, consonant = 0, sonorities = 0;
+      for (let v = 0; v < rows.length - 1; v++) {
+        const length = Math.min(rows[v].length, rows[v+1].length);
+        for (let i = 0; i < length; i++) {
+          if ([0,3,4,5,7,8,9].includes(Math.abs(rows[v][i]-rows[v+1][i])%12)) consonant++;
+          sonorities++;
+          if (!i) continue;
+          const a=Math.sign(rows[v][i]-rows[v][i-1]), b=Math.sign(rows[v+1][i]-rows[v+1][i-1]);
+          if (!a || !b) oblique++; else if (a===b) similar++; else contrary++;
+        }
+      }
+      if (voices.length < 2) return 'Add another labeled voice to reveal contrapuntal relationships.';
+      const dominantMotion = contrary >= similar && contrary >= oblique ? 'contrary' : similar >= oblique ? 'similar' : 'oblique';
+      const stability = sonorities ? Math.round(consonant/sonorities*100) : 0;
+      return `Across ${voices.length} voices, ${dominantMotion} motion is most frequent in adjacent pairs. Approximately ${stability}% of sampled vertical intervals are treated as consonant in this simplified reading.`;
+    }
+
     function renderAnalysis(data) {
       $('m-notes').textContent = data.note_count;
       $('m-range').textContent = data.range_semitones;
       $('m-classes').textContent = data.distinct_pitch_classes;
       $('m-center').textContent = data.tonal_center;
-      $('contour-label').textContent = data.contour;
+      $('contour-label').textContent = `${voiceSelect.options[voiceSelect.selectedIndex]?.text || 'Focus voice'} · ${data.contour}`;
       $('climax-label').textContent = `Climax · note ${data.climax_position}`;
       $('avg-motion').textContent = `${data.average_motion.toFixed(2)} semitones`;
       $('direction').textContent = `↑ ${data.ascending} · ↓ ${data.descending}`;
       const motions = data.steps + data.leaps + data.repeated;
       setBar('steps', data.steps, motions); setBar('leaps', data.leaps, motions); setBar('repeat', data.repeated, motions);
-      renderContour(data.midi);
+      renderTexture();
       const stepRatio = motions ? data.steps / motions : 0;
       $('insight-title').textContent = stepRatio >= .6 ? 'A vocal, conjunct melodic design' : data.leaps > data.steps ? 'An energized, disjunct subject' : 'A balanced interval design';
-      $('insight-copy').textContent = `The line spans ${data.range_semitones} semitones and reaches its high point at note ${data.climax_position}. ${data.steps} stepwise motions create continuity while ${data.leaps} leap${data.leaps===1?'':'s'} add${data.leaps===1?'s':''} structural energy. ${data.tonal_center} exerts the strongest pitch-class gravity; treat this as evidence, not a definitive key identification.`;
+      $('insight-copy').textContent = `The focused line spans ${data.range_semitones} semitones and reaches its high point at note ${data.climax_position}. ${data.steps} stepwise motions create continuity while ${data.leaps} leap${data.leaps===1?'':'s'} add${data.leaps===1?'s':''} structural energy. ${describeTexture()} Treat these measurements as listening prompts, not a definitive harmonic analysis.`;
       $('saved-badge').textContent = data.id ? '✓ Saved to Neon archive' : 'Analyzed locally';
       results.classList.remove('hidden');
       results.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -172,7 +262,9 @@
       const button = form.querySelector('.analyze'), old = button.innerHTML;
       button.disabled = true; button.textContent = 'Reading the subject…';
       try {
-        const response = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes:notes.value}) });
+        const voices = syncVoices(), focus = voices[Number(voiceSelect.value || 0)];
+        if (!focus) throw new Error('Enter at least one voice using “Name: C4 D4 E4”.');
+        const response = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes:focus.notes}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Analysis failed');
         renderAnalysis(data); await loadHistory();
@@ -188,11 +280,18 @@
         if (!response.ok) throw new Error();
         if (!data.analyses.length) { history.innerHTML = '<p class="empty">Your analyzed subjects will appear here.</p>'; return; }
         history.innerHTML = data.analyses.map(item => `<button class="history-item" type="button" data-notes="${escapeText(item.notes)}"><span class="history-id">${String(item.id).padStart(3,'0')}</span><span><strong>${escapeText(item.notes)}</strong><small>${item.created_at} UTC · ${item.summary.note_count} notes · ${item.summary.range_semitones} semitones</small></span><b>Revisit →</b></button>`).join('');
-        history.querySelectorAll('[data-notes]').forEach(item => item.addEventListener('click', () => { notes.value=item.dataset.notes; window.scrollTo({top:0,behavior:'smooth'}); }));
+        history.querySelectorAll('[data-notes]').forEach(item => item.addEventListener('click', () => { notes.value=`Archived voice: ${item.dataset.notes}`; syncVoices(); window.scrollTo({top:0,behavior:'smooth'}); }));
       } catch { history.innerHTML = '<p class="empty">Archive unavailable. Your server may still be waking up.</p>'; }
     }
 
     $('refresh').addEventListener('click', loadHistory);
+    notes.addEventListener('input', syncVoices);
+    voiceSelect.addEventListener('change', () => { stopAudio(); if (!results.classList.contains('hidden')) renderTexture(); });
+    tempo.addEventListener('input', () => { $('tempo-value').textContent = `${tempo.value} BPM`; });
+    $('play-texture').addEventListener('click', () => playVoices(false));
+    $('play-focus').addEventListener('click', () => playVoices(true));
+    $('stop-audio').addEventListener('click', stopAudio);
+    syncVoices();
     loadHistory();
   </script>
 </body>

@@ -88,9 +88,9 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
         </div>
         <div class="form-bar">
           <div class="examples" aria-label="Example subjects">
-            <button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 Eb5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 Bb4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 Bb2/2 D3/2"><strong>Fugal entries</strong><small>3 voices · C# + Eb</small></button>
-            <button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F#5/0.5 E5/1 Eb5/1&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 Bb4/1 C#5/1 B4/2"><strong>D minor duo</strong><small>Chromatic exchange</small></button>
-            <button type="button" data-notes="Upper: C5/1 G5/0.5 Eb5/0.5 A5/1 F#5/2 D5/1 Bb4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 Ab4/1 F4/0.5 A4/0.5 B4/2 G#4/1 C5/2"><strong>Leaping duo</strong><small>Wide color · # + b</small></button>
+            <button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2"><strong>Fugal entries</strong><small>3 voices · staggered entries</small></button>
+            <button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2"><strong>D minor duo</strong><small>Imitative exchange</small></button>
+            <button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/2 D5/1 B4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2"><strong>Leaping duo</strong><small>Wide interval study</small></button>
           </div>
           <button class="analyze" type="submit"><span>Analyze subject</span><b>→</b></button>
         </div>
@@ -221,22 +221,34 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
       audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
       await audioContext.resume();
       const beat = 60 / Number(tempo.value), start = audioContext.currentTime + .08;
+      const master = audioContext.createGain(), compressor = audioContext.createDynamicsCompressor();
+      master.gain.value = .82;
+      compressor.threshold.value = -18; compressor.knee.value = 16;
+      compressor.ratio.value = 3; compressor.attack.value = .012; compressor.release.value = .22;
+      master.connect(compressor).connect(audioContext.destination);
+      const textureLevel = Math.min(.072, .12 / Math.sqrt(Math.max(voices.length, 1)));
       let latestRelease = start;
       voices.forEach((voice, voiceIndex) => {
         if (focusOnly && voiceIndex !== selected) return;
         parseEvents(voice).forEach(event => {
           if (event.rest) return;
           const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
-          oscillator.type = ['triangle','sine','sawtooth'][voiceIndex % 3];
+          oscillator.type = ['triangle','sine','triangle'][voiceIndex % 3];
+          oscillator.detune.value = (voiceIndex - (voices.length-1)/2) * 2.5;
           oscillator.frequency.value = 440 * Math.pow(2, (event.midi - 69) / 12);
           const onset = start + event.start * beat, release = onset + event.duration * beat * .92;
           latestRelease = Math.max(latestRelease, release);
-          const level = focusOnly || voiceIndex === selected ? .105 : .026;
+          const level = focusOnly ? .11 : textureLevel;
           gain.gain.setValueAtTime(.0001, onset);
           gain.gain.exponentialRampToValueAtTime(level, onset + .025);
           gain.gain.setValueAtTime(level, Math.max(onset + .03, release - .08));
           gain.gain.exponentialRampToValueAtTime(.0001, release);
-          oscillator.connect(gain).connect(audioContext.destination);
+          oscillator.connect(gain);
+          if (audioContext.createStereoPanner && voices.length > 1) {
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = -.58 + voiceIndex * 1.16 / (voices.length - 1);
+            gain.connect(panner).connect(master);
+          } else gain.connect(master);
           oscillator.start(onset); oscillator.stop(release + .02); activeSources.push(oscillator);
         });
       });
@@ -343,6 +355,23 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
     if (/^Archived voice\s*:/i.test(notes.value)) notes.value = notes.value.replace(/^Archived voice\s*:/i, 'Voice I:');
     syncVoices();
     loadHistory();
+
+    if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.documentElement.classList.add('reveal-ready');
+      const revealObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+        if (entry.isIntersecting) { entry.target.classList.add('revealed'); revealObserver.unobserve(entry.target); }
+      }), {threshold:.12, rootMargin:'0px 0px -6%'});
+      document.querySelectorAll('.method-intro,.method-story,.method-image,.practice-steps,.method-result,.invitation>*,.studio-top,#analysis-form,.results>*,.archive>*').forEach(element => revealObserver.observe(element));
+    }
+
+    if ('IntersectionObserver' in window) {
+      const navLinks = [...document.querySelectorAll('nav a[href^="#"]')];
+      const navObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        navLinks.forEach(link => link.toggleAttribute('aria-current', link.getAttribute('href') === `#${entry.target.id}`));
+      }), {rootMargin:'-25% 0px -65%'});
+      navLinks.forEach(link => { const section = document.querySelector(link.getAttribute('href')); if (section) navObserver.observe(section); });
+    }
   </script>
 </body>
 </html>

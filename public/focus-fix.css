@@ -1,0 +1,9 @@
+/* Restores a clear visual hierarchy between the selected voice and the surrounding texture. */
+.texture-voice { opacity:.3; transition:opacity .2s ease,filter .2s ease; }
+.texture-voice .texture-line { stroke-width:2; }
+.texture-voice .texture-point { opacity:.55; }
+.texture-voice.is-focus { opacity:1; filter:drop-shadow(0 0 5px rgba(240,205,131,.45)); }
+.texture-voice.is-focus .texture-line { stroke-width:4.5; }
+.texture-voice.is-focus .texture-point { opacity:1; r:5px; }
+.voice-legend span { opacity:.48; transition:opacity .2s ease,color .2s ease; }
+.voice-legend span.is-focus { opacity:1; color:#f0cd83; font-weight:600; }

@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#13110d">
-  <title>FisoBach — Melodic Intelligence</title>
+  <meta name="description" content="Patrick Fiset's 25-year practice of attentive, voice-by-voice listening to the counterpoint of J. S. Bach.">
+  <title>FisoBach — Listening Deeply into Bach</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -13,22 +14,52 @@
       <span class="brand-mark">FB</span>
       <span>FisoBach <small>Melodic Intelligence</small></span>
     </a>
-    <div class="live"><i></i><span id="status">Analysis engine online</span></div>
+    <nav aria-label="Primary navigation">
+      <a href="#method">The method</a>
+      <a href="#workbench">Workbench</a>
+      <a class="nav-contact" href="mailto:patrick.fiset@gmail.com">Connect</a>
+    </nav>
   </header>
 
   <main>
     <section class="hero">
       <div>
-        <p class="eyebrow">COUNTERPOINT LAB · BWV WORKBENCH</p>
-        <h1>See the architecture<br>inside a melody.</h1>
-        <p class="lede">Turn a line of notes into evidence: contour, interval character, range, tonal gravity, and structural climax—all in one analytical scorecard.</p>
+        <p class="eyebrow">AN OPEN INVITATION · PATRICK FISET</p>
+        <h1>Listening deeply<br>into Bach.</h1>
+        <p class="lede">For 25 years, I’ve explored Bach one voice at a time—through repetition, anticipation, and attentive listening inside the polyphony.</p>
+        <a class="hero-cta" href="mailto:patrick.fiset@gmail.com"><span>Connect with me</span><b>↗</b></a>
       </div>
-      <blockquote>“The aim and final end of all music should be none other than the glory of God and the refreshment of the soul.”<cite>— J. S. Bach</cite></blockquote>
+      <blockquote>Play the voice.<br>Listen without playing.<br>Repeat—until its behavior within the counterpoint becomes fully anticipated.<cite>THE LISTENING PRACTICE</cite></blockquote>
     </section>
 
-    <section class="studio" aria-labelledby="studio-title">
+    <section id="method" class="method" aria-labelledby="method-title">
+      <div class="method-intro">
+        <p class="section-no">01 · THE PRACTICE</p>
+        <h2 id="method-title">One piece.<br>One voice.<br>Deep attention.</h2>
+      </div>
+      <div class="method-story">
+        <p class="lead-story">I randomly select a work—perhaps an aria from a cantata—then focus on one randomly selected voice, such as the viola, or sometimes a “virtual” voice hidden within the texture.</p>
+        <p>Beyond structural, macro-level analysis, my real interest is in the microscopic life of the music: relationships between voices, internal patterns, and the behavior that only reveals itself through sustained listening.</p>
+        <p>I come from a background in musicology, music theory, and analysis. But this practice does not depend on academic training. Its essential tools are patience, repetition, curiosity, and attentive ears.</p>
+      </div>
+      <div class="practice-steps" aria-label="The three-step listening practice">
+        <article><span>01</span><strong>Play</strong><p>Isolate and perform one voice until its physical shape becomes familiar.</p></article>
+        <article><span>02</span><strong>Listen</strong><p>Hear that voice inside the complete texture without playing along.</p></article>
+        <article><span>03</span><strong>Anticipate</strong><p>Repeat until you can feel its next move within the polyphony.</p></article>
+      </div>
+      <aside class="method-result"><span>25</span><p><strong>Years of detailed listening</strong>Over time, this process builds a deep, embodied understanding of counterpoint—not only how the voices are written, but how they think together.</p></aside>
+    </section>
+
+    <section class="invitation" aria-labelledby="invitation-title">
+      <p class="section-no">A SHARED INQUIRY</p>
+      <h2 id="invitation-title">Looking for others who<br>listen at this level.</h2>
+      <p>I’m interested in connecting with people who analyze Bach in detail: listeners, performers, theorists, and patient explorers of contrapuntal relationships. If this way of listening resonates with you, I would be glad to hear about your own practice.</p>
+      <a href="mailto:patrick.fiset@gmail.com"><span>patrick.fiset@gmail.com</span><b>Write to Patrick ↗</b></a>
+    </section>
+
+    <section id="workbench" class="studio" aria-labelledby="studio-title">
       <div class="studio-top">
-        <div><p class="section-no">01 · SUBJECT</p><h2 id="studio-title">Melodic workbench</h2></div>
+        <div><p class="section-no">02 · DIGITAL WORKBENCH</p><h2 id="studio-title">Explore a melodic voice</h2></div>
         <span class="notation-help">Scientific pitch notation · e.g. C4 F#4 Bb3</span>
       </div>
       <form id="analysis-form">
@@ -47,7 +78,7 @@
     </section>
 
     <section id="results" class="results hidden" aria-live="polite">
-      <div class="section-heading"><div><p class="section-no">02 · FINDINGS</p><h2>Structural reading</h2></div><span id="saved-badge">Saved to research archive</span></div>
+      <div class="section-heading"><div><p class="section-no">03 · FINDINGS</p><h2>Structural reading</h2></div><span id="saved-badge">Saved to research archive</span></div>
       <div class="metric-grid">
         <article><span>Notes</span><strong id="m-notes">—</strong><small>subject length</small></article>
         <article><span>Range</span><strong id="m-range">—</strong><small>semitones</small></article>
@@ -71,12 +102,12 @@
     </section>
 
     <section class="archive" aria-labelledby="archive-title">
-      <div class="section-heading"><div><p class="section-no">03 · ARCHIVE</p><h2 id="archive-title">Research timeline</h2></div><button id="refresh" class="text-button" type="button">Refresh archive ↻</button></div>
+      <div class="section-heading"><div><p class="section-no">04 · ARCHIVE</p><h2 id="archive-title">Research timeline</h2></div><button id="refresh" class="text-button" type="button">Refresh archive ↻</button></div>
       <div id="history" class="history"><p class="empty">Your analyzed subjects will appear here.</p></div>
     </section>
   </main>
 
-  <footer><span>FisoBach</span><p>Built for attentive listening and rigorous inquiry.</p><span>PostgreSQL · Neon</span></footer>
+  <footer><span>FisoBach</span><p>Patience · Repetition · Attentive listening</p><a href="mailto:patrick.fiset@gmail.com">patrick.fiset@gmail.com</a></footer>
 
   <script>
     const $ = id => document.getElementById(id);

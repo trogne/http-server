@@ -174,7 +174,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
     }
 
     function renderTexture() {
-      const voices = parseVoices(), selected = Number(voiceSelect.value || 0);
+      const voices = parseVoices();
       const timelines = voices.map(parseEvents);
       const sounded = timelines.map(events => events.filter(event => !event.rest));
       const all = sounded.flat().map(event => event.midi); if (!all.length) return;
@@ -183,15 +183,16 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
       const totalBeats = Math.max(...timelines.flat().map(event => event.start + event.duration));
       const point = event => ({x:pad+event.start*(width-pad*2)/Math.max(totalBeats,1), y:height-pad-(event.midi-min)*(height-pad*2)/span});
       const colors = ['#caa45d','#91a8a0','#a68ca8','#a98772','#8296b0'];
-      const order = sounded.map((_,i)=>i).sort((a,b)=>(a===selected)-(b===selected));
-      const grid = [0,1,2,3].map(i => `<line x1="${pad}" y1="${pad+i*(height-pad*2)/3}" x2="${width-pad}" y2="${pad+i*(height-pad*2)/3}"/>`).join('');
-      const lines = order.map(voiceIndex => {
-        const points=sounded[voiceIndex].map(point), focus=voiceIndex===selected, color=colors[voiceIndex%colors.length];
-        return `<polyline class="texture-line ${focus?'focus':''}" style="--voice:${color}" points="${points.map(p=>`${p.x},${p.y}`).join(' ')}"/>` +
-          points.map(p=>`<circle class="texture-point ${focus?'focus':''}" style="--voice:${color}" cx="${p.x}" cy="${p.y}" r="${focus?4.5:3}"/>`).join('');
+      const horizontalGrid = [0,1,2,3].map(i => `<line x1="${pad}" y1="${pad+i*(height-pad*2)/3}" x2="${width-pad}" y2="${pad+i*(height-pad*2)/3}"/>`).join('');
+      const verticalGrid = [0,1,2,3,4].map(i => `<line x1="${pad+i*(width-pad*2)/4}" y1="${pad}" x2="${pad+i*(width-pad*2)/4}" y2="${height-pad}"/>`).join('');
+      const lines = sounded.map((events, voiceIndex) => {
+        const points=events.map(point), color=colors[voiceIndex%colors.length], delay=voiceIndex*.12;
+        return `<g class="texture-voice" style="--voice:${color};--delay:${delay}s"><polyline class="texture-line" pathLength="1" points="${points.map(p=>`${p.x},${p.y}`).join(' ')}"/>` +
+          points.map((p,index)=>`<circle class="texture-point" style="--point-delay:${delay+index*.018}s" cx="${p.x}" cy="${p.y}" r="3.5"/>`).join('') + '</g>';
       }).join('');
-      svg.innerHTML = `<g class="grid">${grid}</g>${lines}`;
-      $('voice-legend').innerHTML = voices.map((voice,index) => `<span class="${index===selected?'focus':''}"><i style="--voice:${colors[index%colors.length]}"></i>${escapeText(voice.name)}</span>`).join('');
+      svg.innerHTML = `<g class="grid vertical">${verticalGrid}</g><g class="grid">${horizontalGrid}</g>${lines}`;
+      svg.setAttribute('aria-label', `${voices.length} contrapuntal voices shown with equal emphasis across ${totalBeats} beats`);
+      $('voice-legend').innerHTML = voices.map((voice,index) => `<span><i style="--voice:${colors[index%colors.length]}"></i>${escapeText(voice.name)}</span>`).join('');
     }
 
     function setBar(id, count, total) {
@@ -301,7 +302,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
         if (!data.analyses.length) { history.innerHTML = '<p class="empty">Your analyzed subjects will appear here.</p>'; return; }
         history.innerHTML = data.analyses.map(item => `<button class="history-item" type="button" data-notes="${escapeText(item.notes)}"><span class="history-id">${String(item.id).padStart(3,'0')}</span><span><strong>${escapeText(item.notes)}</strong><small>${item.created_at} UTC · ${item.summary.note_count} notes · ${item.summary.range_semitones} semitones</small></span><b>Revisit →</b></button>`).join('');
         history.querySelectorAll('[data-notes]').forEach(item => item.addEventListener('click', () => {
-          notes.value = `Archived voice: ${item.dataset.notes}`;
+          notes.value = `Voice I: ${item.dataset.notes}`;
           syncVoices();
           $('workbench').scrollIntoView({behavior:'smooth', block:'start'});
           notes.focus({preventScroll:true});
@@ -316,6 +317,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
     $('play-texture').addEventListener('click', () => playVoices(false));
     $('play-focus').addEventListener('click', () => playVoices(true));
     $('stop-audio').addEventListener('click', stopAudio);
+    if (/^Archived voice\s*:/i.test(notes.value)) notes.value = notes.value.replace(/^Archived voice\s*:/i, 'Voice I:');
     syncVoices();
     loadHistory();
   </script>

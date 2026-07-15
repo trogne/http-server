@@ -143,6 +143,13 @@ def main():
             analysis = json.loads(body)
             assert status == 200 and analysis["note_count"] == 7
             assert analysis["range_semitones"] == 5 and analysis["contour"] == "balanced"
+            assert analysis["steps"] == 6 and analysis["leaps"] == 0
+            assert analysis["tonal_center"] == "C" and len(analysis["midi"]) == 7
+            assert analysis["id"] > 0
+            status, _, body = json_request(port, "GET", "/api/analyses")
+            archive = json.loads(body)
+            assert status == 200 and archive["analyses"][0]["id"] == analysis["id"]
+            assert archive["analyses"][0]["summary"]["note_count"] == 7
             assert json_request(port, "POST", "/api/analyze", b'{"notes":"C4 nope G4"}')[0] == 400
             assert request(port, "GET", "/api/analyze")[0] == 405
 

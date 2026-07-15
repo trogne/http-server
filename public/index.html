@@ -3,319 +3,160 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Bach Music Analysis</title>
+  <meta name="theme-color" content="#13110d">
+  <title>FisoBach — Melodic Intelligence</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="FisoBach home">
+      <span class="brand-mark">FB</span>
+      <span>FisoBach <small>Melodic Intelligence</small></span>
+    </a>
+    <div class="live"><i></i><span id="status">Connecting</span></div>
+  </header>
+
   <main>
-    <div class="hero">
-      <div class="bach-mark">BWV</div>
-      <h1>Bach Music Analysis</h1>
-      <p class="hero-copy">A contrapuntal control room for exploring melodic shape and managing research collaborators.</p>
-    </div>
-    <div class="about-card">
-      <strong>Melodic microscope</strong>
-      <span>Enter scientific pitch notation to measure range, pitch-class variety, and contour.</span>
-    </div>
-    <section class="analysis-card">
-      <h2>Analyze a melodic subject</h2>
-      <form id="analysis-form">
-        <label>Notes
-          <textarea id="analysis-notes" rows="3">C4 D4 E4 F4 G4 F4 E4 D4 C4</textarea>
-        </label>
-        <button type="submit">Analyze subject</button>
-      </form>
-      <div id="analysis-result" class="analysis-result" aria-live="polite">Awaiting a subject…</div>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">COUNTERPOINT LAB · BWV WORKBENCH</p>
+        <h1>See the architecture<br>inside a melody.</h1>
+        <p class="lede">Turn a line of notes into evidence: contour, interval character, range, tonal gravity, and structural climax—all in one analytical scorecard.</p>
+      </div>
+      <blockquote>“The aim and final end of all music should be none other than the glory of God and the refreshment of the soul.”<cite>— J. S. Bach</cite></blockquote>
     </section>
-    <div id="status-panel" class="status-panel">
-      <span id="status-text">Checking server…</span>
-      <span id="user-count">Users: 0</span>
-    </div>
-    <label>API write token
-      <input id="api-token" type="password" autocomplete="current-password"
-             placeholder="Required to create, edit, or delete users">
-    </label>
-    <form id="user-form">
-      <input type="hidden" name="id" value="">
-      <label>Name
-        <input name="name" required>
-      </label>
-      <label>Email
-        <input name="email" type="email" required>
-      </label>
-      <button type="submit">Create user</button>
-    </form>
-    <p id="message" role="status"></p>
-    <div id="loading" class="loading" aria-live="polite">Loading…</div>
-    <h2>Research collaborators</h2>
-    <div class="toolbar">
-      <input id="search" placeholder="Search by name or email">
-      <select id="sort-select">
-        <option value="id">Sort by ID</option>
-        <option value="name">Sort by name</option>
-        <option value="email">Sort by email</option>
-      </select>
-      <button id="order-button" type="button">Order: Asc</button>
-      <button id="search-button" type="button">Search</button>
-    </div>
-    <div class="toolbar">
-      <button id="prev-page" type="button">Previous</button>
-      <span id="page-info">Page 1</span>
-      <button id="next-page" type="button">Next</button>
-      <button id="refresh-button" type="button">Refresh</button>
-      <button id="reset-button" type="button">Reset form</button>
-    </div>
-    <ul id="users"></ul>
+
+    <section class="studio" aria-labelledby="studio-title">
+      <div class="studio-top">
+        <div><p class="section-no">01 · SUBJECT</p><h2 id="studio-title">Melodic workbench</h2></div>
+        <span class="notation-help">Scientific pitch notation · e.g. C4 F#4 Bb3</span>
+      </div>
+      <form id="analysis-form">
+        <label class="sr-only" for="notes">Notes to analyze</label>
+        <textarea id="notes" rows="3" spellcheck="false" placeholder="Enter a melodic subject…">C4 D4 E4 F4 G4 A4 G4 F4 E4 D4 C4</textarea>
+        <div class="form-bar">
+          <div class="examples" aria-label="Example subjects">
+            <button type="button" data-notes="C4 D4 E4 F4 G4 A4 G4 F4 E4 D4 C4">Arch</button>
+            <button type="button" data-notes="D4 F4 A4 C5 B4 G4 E4 C#4 D4">D minor</button>
+            <button type="button" data-notes="C4 G4 E4 A4 F4 D4 B3 C4">Leaping</button>
+          </div>
+          <button class="analyze" type="submit"><span>Analyze subject</span><b>→</b></button>
+        </div>
+      </form>
+      <p id="error" class="error" role="alert"></p>
+    </section>
+
+    <section id="results" class="results hidden" aria-live="polite">
+      <div class="section-heading"><div><p class="section-no">02 · FINDINGS</p><h2>Structural reading</h2></div><span id="saved-badge">Saved to research archive</span></div>
+      <div class="metric-grid">
+        <article><span>Notes</span><strong id="m-notes">—</strong><small>subject length</small></article>
+        <article><span>Range</span><strong id="m-range">—</strong><small>semitones</small></article>
+        <article><span>Pitch colors</span><strong id="m-classes">—</strong><small>distinct classes</small></article>
+        <article class="accent"><span>Tonal gravity</span><strong id="m-center">—</strong><small>most frequent pitch</small></article>
+      </div>
+      <div class="analysis-grid">
+        <article class="chart-card">
+          <div class="card-title"><div><span>MELODIC CONTOUR</span><strong id="contour-label">—</strong></div><span id="climax-label">Climax —</span></div>
+          <svg id="contour" viewBox="0 0 760 250" role="img" aria-label="Melodic contour chart"></svg>
+        </article>
+        <article class="motion-card">
+          <div class="card-title"><div><span>INTERVAL CHARACTER</span><strong>Motion profile</strong></div></div>
+          <div class="motion-row"><span>Stepwise</span><div><i id="steps-bar"></i></div><b id="steps-value">0</b></div>
+          <div class="motion-row"><span>Leaps</span><div><i id="leaps-bar"></i></div><b id="leaps-value">0</b></div>
+          <div class="motion-row"><span>Repeated</span><div><i id="repeat-bar"></i></div><b id="repeat-value">0</b></div>
+          <dl><div><dt>Average motion</dt><dd id="avg-motion">—</dd></div><div><dt>Direction</dt><dd id="direction">—</dd></div></dl>
+        </article>
+      </div>
+      <article class="insight"><span class="ornament">𝄞</span><div><p>ANALYST'S NOTE</p><h3 id="insight-title">A balanced melodic design</h3><p id="insight-copy"></p></div></article>
+    </section>
+
+    <section class="archive" aria-labelledby="archive-title">
+      <div class="section-heading"><div><p class="section-no">03 · ARCHIVE</p><h2 id="archive-title">Research timeline</h2></div><button id="refresh" class="text-button" type="button">Refresh archive ↻</button></div>
+      <div id="history" class="history"><p class="empty">Your analyzed subjects will appear here.</p></div>
+    </section>
   </main>
+
+  <footer><span>FisoBach</span><p>Built for attentive listening and rigorous inquiry.</p><span>PostgreSQL · Neon</span></footer>
+
   <script>
-    const form = document.getElementById('user-form');
-    const analysisForm = document.getElementById('analysis-form');
-    const analysisNotes = document.getElementById('analysis-notes');
-    const analysisResult = document.getElementById('analysis-result');
-    const message = document.getElementById('message');
-    const usersList = document.getElementById('users');
-    const searchInput = document.getElementById('search');
-    const searchButton = document.getElementById('search-button');
-    const sortSelect = document.getElementById('sort-select');
-    const orderButton = document.getElementById('order-button');
-    const prevButton = document.getElementById('prev-page');
-    const nextButton = document.getElementById('next-page');
-    const refreshButton = document.getElementById('refresh-button');
-    const resetButton = document.getElementById('reset-button');
-    const pageInfo = document.getElementById('page-info');
-    const statusText = document.getElementById('status-text');
-    const userCount = document.getElementById('user-count');
-    const loading = document.getElementById('loading');
-    const apiTokenInput = document.getElementById('api-token');
-    let currentPage = 1;
-    let currentSearch = '';
-    let currentSort = 'id';
-    let currentOrder = 'asc';
-    let statusRetryTimer;
-    let apiConfirmed = false;
+    const $ = id => document.getElementById(id);
+    const form = $('analysis-form'), notes = $('notes'), error = $('error'), results = $('results');
+    const sampleButtons = document.querySelectorAll('[data-notes]');
 
-    function markApiAvailable(details = '') {
-      apiConfirmed = true;
-      statusText.textContent = details ? `API OK · ${details}` : 'API OK';
+    sampleButtons.forEach(button => button.addEventListener('click', () => {
+      notes.value = button.dataset.notes; notes.focus();
+    }));
+
+    function renderContour(values) {
+      const svg = $('contour'), width = 760, height = 250, pad = 32;
+      const min = Math.min(...values), max = Math.max(...values), span = Math.max(max - min, 1);
+      const point = (value, index) => ({
+        x: pad + index * (width - pad * 2) / Math.max(values.length - 1, 1),
+        y: height - pad - (value - min) * (height - pad * 2) / span
+      });
+      const points = values.map(point);
+      const line = points.map(p => `${p.x},${p.y}`).join(' ');
+      const area = `${pad},${height-pad} ${line} ${width-pad},${height-pad}`;
+      svg.innerHTML = `
+        <defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#caa45d" stop-opacity=".35"/><stop offset="1" stop-color="#caa45d" stop-opacity="0"/></linearGradient></defs>
+        <g class="grid">${[0,1,2,3].map(i => `<line x1="${pad}" y1="${pad+i*(height-pad*2)/3}" x2="${width-pad}" y2="${pad+i*(height-pad*2)/3}"/>`).join('')}</g>
+        <polygon points="${area}" fill="url(#fill)"/><polyline class="contour-line" points="${line}"/>
+        ${points.map((p,i) => `<circle class="note-point ${values[i]===max?'climax':''}" cx="${p.x}" cy="${p.y}" r="${values[i]===max?6:4}"/>`).join('')}`;
     }
 
-    function updateOrderButton() {
-      orderButton.textContent = `Order: ${currentOrder === 'asc' ? 'Asc' : 'Desc'}`;
+    function setBar(id, count, total) {
+      $(id+'-bar').style.width = `${total ? Math.max(4, count / total * 100) : 0}%`;
+      $(id+'-value').textContent = count;
     }
 
-    function writeHeaders(includeJson = false) {
-      const headers = {};
-      if (includeJson) headers['Content-Type'] = 'application/json';
-      const token = apiTokenInput.value.trim();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return headers;
+    function renderAnalysis(data) {
+      $('m-notes').textContent = data.note_count;
+      $('m-range').textContent = data.range_semitones;
+      $('m-classes').textContent = data.distinct_pitch_classes;
+      $('m-center').textContent = data.tonal_center;
+      $('contour-label').textContent = data.contour;
+      $('climax-label').textContent = `Climax · note ${data.climax_position}`;
+      $('avg-motion').textContent = `${data.average_motion.toFixed(2)} semitones`;
+      $('direction').textContent = `↑ ${data.ascending} · ↓ ${data.descending}`;
+      const motions = data.steps + data.leaps + data.repeated;
+      setBar('steps', data.steps, motions); setBar('leaps', data.leaps, motions); setBar('repeat', data.repeated, motions);
+      renderContour(data.midi);
+      const stepRatio = motions ? data.steps / motions : 0;
+      $('insight-title').textContent = stepRatio >= .6 ? 'A vocal, conjunct melodic design' : data.leaps > data.steps ? 'An energized, disjunct subject' : 'A balanced interval design';
+      $('insight-copy').textContent = `The line spans ${data.range_semitones} semitones and reaches its high point at note ${data.climax_position}. ${data.steps} stepwise motions create continuity while ${data.leaps} leap${data.leaps===1?'':'s'} add${data.leaps===1?'s':''} structural energy. ${data.tonal_center} exerts the strongest pitch-class gravity; treat this as evidence, not a definitive key identification.`;
+      $('saved-badge').textContent = data.id ? '✓ Saved to Neon archive' : 'Analyzed locally';
+      results.classList.remove('hidden');
+      results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    analysisForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      analysisResult.textContent = 'Analyzing contrapuntal motion…';
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); error.textContent = '';
+      const button = form.querySelector('.analyze'), old = button.innerHTML;
+      button.disabled = true; button.textContent = 'Reading the subject…';
       try {
-        const response = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notes: analysisNotes.value }),
-        });
+        const response = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes:notes.value}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Analysis failed');
-        analysisResult.textContent =
-          `${data.note_count} notes · ${data.distinct_pitch_classes} pitch classes · ` +
-          `${data.range_semitones} semitone range · ${data.contour} ` +
-          `(↑${data.ascending} ↓${data.descending} =${data.repeated})`;
-        markApiAvailable();
-      } catch (error) {
-        analysisResult.textContent = error.message;
-      }
+        renderAnalysis(data); await loadHistory();
+      } catch (cause) { error.textContent = cause.message; }
+      finally { button.disabled = false; button.innerHTML = old; }
     });
 
-    async function loadUsers() {
-      loading.style.display = 'block';
-      const params = new URLSearchParams({ page: currentPage, limit: 5, sort: currentSort, order: currentOrder });
-      if (currentSearch) params.set('search', currentSearch);
-      const response = await fetch(`/users?${params.toString()}`);
-      if (!response.ok) throw new Error(`Users request returned ${response.status}`);
-      const data = await response.json();
-      markApiAvailable();
-      usersList.innerHTML = '';
-      if (!data.users.length) {
-        const emptyItem = document.createElement('li');
-        emptyItem.className = 'empty-state';
-        emptyItem.textContent = 'No users found.';
-        usersList.appendChild(emptyItem);
-      }
-      for (const user of data.users) {
-        const item = document.createElement('li');
-        const label = document.createElement('span');
-        label.textContent = `${user.name} <${user.email}>`;
-        const editButton = document.createElement('button');
-        editButton.textContent = 'Edit';
-        editButton.type = 'button';
-        editButton.onclick = () => fillForm(user);
-        const deleteButton = document.createElement('button');
-        deleteButton.textContent = 'Delete';
-        deleteButton.type = 'button';
-        deleteButton.onclick = () => deleteUser(user.id);
-        item.appendChild(label);
-        item.appendChild(editButton);
-        item.appendChild(deleteButton);
-        usersList.appendChild(item);
-      }
-      pageInfo.textContent = `Page ${data.page} · Total ${data.total}`;
-      prevButton.disabled = data.page <= 1;
-      nextButton.disabled = data.page * data.limit >= data.total;
-      userCount.textContent = `Users: ${data.total}`;
-      loading.style.display = 'none';
-    }
-
-    async function refreshStatus() {
-      clearTimeout(statusRetryTimer);
-      loading.style.display = 'block';
+    function escapeText(text) { const span = document.createElement('span'); span.textContent = text; return span.innerHTML; }
+    async function loadHistory() {
+      const history = $('history');
       try {
-        const healthResponse = await fetch('/health', { cache: 'no-store' });
-        if (!healthResponse.ok) throw new Error(`Health check returned ${healthResponse.status}`);
-        const health = await healthResponse.json();
-        let requestCount = health.requests;
-        try {
-          const statsResponse = await fetch('/api/stats', { cache: 'no-store' });
-          if (statsResponse.ok) requestCount = (await statsResponse.json()).requests;
-        } catch (error) {
-          console.debug('Optional stats request failed:', error);
-        }
-        const requests = Number.isFinite(requestCount) ? ` · ${requestCount} req` : '';
-        markApiAvailable(`${health.uptime_seconds}s${requests}`);
-      } catch (error) {
-        if (!apiConfirmed) {
-          statusText.textContent = 'Server is waking up…';
-          statusRetryTimer = setTimeout(refreshStatus, 3000);
-        }
-      } finally {
-        loading.style.display = 'none';
-      }
+        const response = await fetch('/api/analyses', {cache:'no-store'}); const data = await response.json();
+        if (!response.ok) throw new Error();
+        if (!data.analyses.length) { history.innerHTML = '<p class="empty">Your analyzed subjects will appear here.</p>'; return; }
+        history.innerHTML = data.analyses.map(item => `<button class="history-item" type="button" data-notes="${escapeText(item.notes)}"><span class="history-id">${String(item.id).padStart(3,'0')}</span><span><strong>${escapeText(item.notes)}</strong><small>${item.created_at} UTC · ${item.summary.note_count} notes · ${item.summary.range_semitones} semitones</small></span><b>Revisit →</b></button>`).join('');
+        history.querySelectorAll('[data-notes]').forEach(item => item.addEventListener('click', () => { notes.value=item.dataset.notes; window.scrollTo({top:0,behavior:'smooth'}); }));
+      } catch { history.innerHTML = '<p class="empty">Archive unavailable. Your server may still be waking up.</p>'; }
     }
 
-    function setMessage(text, type = 'info') {
-      message.textContent = text;
-      message.className = `message ${type}`;
-    }
-
-    function clearMessage() {
-      message.textContent = '';
-      message.className = 'message';
-    }
-
-    function fillForm(user) {
-      form.elements.id.value = user.id;
-      form.elements.name.value = user.name;
-      form.elements.email.value = user.email;
-      form.querySelector('button').textContent = 'Update user';
-      setMessage(`Editing ${user.name}.`, 'info');
-    }
-
-    function resetForm() {
-      form.reset();
-      form.elements.id.value = '';
-      form.querySelector('button').textContent = 'Create user';
-      clearMessage();
-    }
-
-    async function deleteUser(id) {
-      const response = await fetch(`/users/${id}`, {
-        method: 'DELETE',
-        headers: writeHeaders(),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setMessage('User deleted.', 'success');
-        setTimeout(clearMessage, 1800);
-        await loadUsers();
-      } else {
-        setMessage(data.error || 'Unable to delete user.', 'error');
-        setTimeout(clearMessage, 1800);
-      }
-    }
-
-    async function runSearch() {
-      currentSearch = searchInput.value.trim();
-      currentPage = 1;
-      await loadUsers();
-    }
-
-    searchButton.addEventListener('click', runSearch);
-    sortSelect.addEventListener('change', async () => {
-      currentSort = sortSelect.value;
-      currentPage = 1;
-      await loadUsers();
-    });
-    orderButton.addEventListener('click', async () => {
-      currentOrder = currentOrder === 'asc' ? 'desc' : 'asc';
-      updateOrderButton();
-      currentPage = 1;
-      await loadUsers();
-    });
-    searchInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        runSearch();
-      }
-    });
-
-    prevButton.addEventListener('click', async () => {
-      if (currentPage > 1) {
-        currentPage -= 1;
-        await loadUsers();
-      }
-    });
-
-    nextButton.addEventListener('click', async () => {
-      currentPage += 1;
-      await loadUsers();
-    });
-
-    refreshButton.addEventListener('click', async () => {
-      await Promise.all([loadUsers(), refreshStatus()]);
-    });
-
-    resetButton.addEventListener('click', () => {
-      resetForm();
-    });
-
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        resetForm();
-      }
-    });
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const payload = Object.fromEntries(new FormData(form).entries());
-      const id = payload.id;
-      const body = { name: payload.name, email: payload.email };
-      const response = await fetch(id ? `/users/${id}` : '/users', {
-        method: id ? 'PUT' : 'POST',
-        headers: writeHeaders(true),
-        body: JSON.stringify(body),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setMessage(id ? 'User updated.' : 'User created successfully.', 'success');
-        resetForm();
-        setTimeout(clearMessage, 1800);
-        await loadUsers();
-      } else {
-        setMessage(data.error || 'Unable to save user.', 'error');
-        setTimeout(clearMessage, 1800);
-      }
-    });
-
-    updateOrderButton();
-    loadUsers().catch(() => {
-      setMessage('Unable to load users.', 'error');
-    });
-    refreshStatus();
+    $('refresh').addEventListener('click', loadHistory);
+    fetch('/health', {cache:'no-store'}).then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(() => { $('status').textContent='Analysis engine online'; }).catch(() => { $('status').textContent='Server waking up'; });
+    loadHistory();
   </script>
 </body>
 </html>

@@ -24,7 +24,9 @@ the resource limits appropriate to your environment.
 - `{{value}}` escaped and `{{{trusted_html}}}` raw template substitutions
 - SQLite-backed notes example at `/notes`
 - SQLite-backed JSON Users API at `/users`, with CRUD, search, sorting, and pagination
-- Bach-themed melodic analysis at `POST /api/analyze`
+- Bach-themed structural melodic analysis at `POST /api/analyze`
+- Persistent analysis archive at `GET /api/analyses`
+- Neon PostgreSQL persistence in production with an automatic SQLite fallback locally
 - A raw TCP protocol client (`tcp_client`)
 
 ## Build and run
@@ -68,6 +70,11 @@ curl -X POST http://localhost:8080/api/analyze \
   -H 'Content-Type: application/json' \
   -d '{"notes":"C4 D4 E4 F4 G4 F4 E4 D4 C4"}'
 ```
+
+The response includes contour direction, range, pitch-class variety, step/leap
+motion, average interval size, climax position, estimated pitch-class gravity,
+and MIDI values for visualization. Each successful analysis is saved and appears
+in the research timeline on the home page.
 
 With Docker Desktop on Windows:
 
@@ -119,10 +126,12 @@ make test
 ## Deploy on Render
 
 The included `render.yaml` deploys the Docker image as a Render web service.
-Create a Render Blueprint from this repository to publish it. The free plan uses
-ephemeral storage, so SQLite records can be lost on a restart or redeploy. For
-durable records, use a paid service and attach a persistent disk at
-`/srv/http/data`.
+Create a Render Blueprint from this repository to publish it. Set Render's
+`DATABASE_URL` environment variable to a Neon PostgreSQL connection string for
+durable analysis history on the free plan. The application creates its
+`analyses` table on startup. Without `DATABASE_URL`, history falls back to the
+configured SQLite database. The example notes and collaborator API still use
+SQLite and are not durable on a free Render instance.
 
 From Windows, either use Docker or an installed WSL distribution:
 

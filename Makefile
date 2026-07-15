@@ -1,7 +1,13 @@
 CC ?= cc
 CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror
 LDFLAGS ?=
+PG_CONFIG := $(shell command -v pg_config 2>/dev/null)
+ifneq ($(PG_CONFIG),)
+CFLAGS += -DHAVE_LIBPQ -I$(shell $(PG_CONFIG) --includedir)
+LDLIBS ?= -pthread -lsqlite3 -lpq
+else
 LDLIBS ?= -pthread -lsqlite3
+endif
 
 .PHONY: all clean test benchmark
 

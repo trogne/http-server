@@ -9,6 +9,9 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sqlite3.h>
+#ifdef HAVE_LIBPQ
+#include <libpq-fe.h>
+#endif
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -80,6 +83,10 @@ static FILE *access_log;
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static sqlite3 *database;
 static pthread_mutex_t database_mutex = PTHREAD_MUTEX_INITIALIZER;
+#ifdef HAVE_LIBPQ
+static PGconn *neon_database;
+static pthread_mutex_t neon_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 static char api_token[256];
 
 static void on_signal(int signum) {
@@ -712,6 +719,79 @@ static bool parse_note(const char *text, int *midi, unsigned int *pitch_class) {
     return true;
 }
 
+static long long save_analysis(const char *notes, const char *summary) {
+#ifdef HAVE_LIBPQ
+    if (neon_database) {
+        const char *values[] = { notes, summary };
+        pthread_mutex_lock(&neon_mutex);
+        PGresult *result = PQexecParams(neon_database,
+            "INSERT INTO analyses(notes, summary) VALUES($1, $2::jsonb) RETURNING id",
+            2, NULL, values, NULL, NULL, 0);
+        long long id = PQresultStatus(result) == PGRES_TUPLES_OK ? atoll(PQgetvalue(result, 0, 0)) : 0;
+        PQclear(result); pthread_mutex_unlock(&neon_mutex);
+        return id;
+    }
+#endif
+    pthread_mutex_lock(&database_mutex);
+    sqlite3_stmt *statement = NULL;
+    bool ok = sqlite3_prepare_v2(database,
+        "INSERT INTO analyses(notes, summary) VALUES(?, ?)", -1, &statement, NULL) == SQLITE_OK &&
+        sqlite3_bind_text(statement, 1, notes, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+        sqlite3_bind_text(statement, 2, summary, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+        sqlite3_step(statement) == SQLITE_DONE;
+    long long id = ok ? sqlite3_last_insert_rowid(database) : 0;
+    sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+    return id;
+}
+
+static int analyses_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
+    if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) {
+        const char *body = "{\"error\":\"method not allowed\"}\n"; *bytes = (off_t)strlen(body);
+        return send_json(fd, 405, "Method Not Allowed", body, false, keep_alive, "Allow: GET, HEAD") ? 405 : -1;
+    }
+    string_buffer out = {0}; bool ok = append_bytes(&out, "{\"analyses\":[", 13);
+#ifdef HAVE_LIBPQ
+    if (neon_database) {
+        pthread_mutex_lock(&neon_mutex);
+        PGresult *result = PQexec(neon_database,
+            "SELECT id, notes, summary::text, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') "
+            "FROM analyses ORDER BY id DESC LIMIT 12");
+        ok = ok && PQresultStatus(result) == PGRES_TUPLES_OK;
+        for (int row = 0; ok && row < PQntuples(result); row++) {
+            if (row) ok = append_bytes(&out, ",", 1);
+            ok = ok && append_bytes(&out, "{\"id\":", 6) && append_bytes(&out, PQgetvalue(result,row,0), strlen(PQgetvalue(result,row,0))) &&
+                 append_bytes(&out, ",\"notes\":", 9) && append_json_string(&out, PQgetvalue(result,row,1)) &&
+                 append_bytes(&out, ",\"summary\":", 11) && append_bytes(&out, PQgetvalue(result,row,2), strlen(PQgetvalue(result,row,2))) &&
+                 append_bytes(&out, ",\"created_at\":", 14) && append_json_string(&out, PQgetvalue(result,row,3)) && append_bytes(&out, "}", 1);
+        }
+        PQclear(result); pthread_mutex_unlock(&neon_mutex);
+    } else
+#endif
+    {
+        pthread_mutex_lock(&database_mutex);
+        sqlite3_stmt *statement = NULL;
+        ok = ok && sqlite3_prepare_v2(database,
+            "SELECT id, notes, summary, strftime('%Y-%m-%d %H:%M', created_at) FROM analyses ORDER BY id DESC LIMIT 12",
+            -1, &statement, NULL) == SQLITE_OK;
+        bool first = true;
+        while (ok && sqlite3_step(statement) == SQLITE_ROW) {
+            if (!first) ok = append_bytes(&out, ",", 1);
+            first = false;
+            char id[32]; int n = snprintf(id, sizeof(id), "%lld", sqlite3_column_int64(statement, 0));
+            ok = ok && n > 0 && append_bytes(&out, "{\"id\":", 6) && append_bytes(&out, id, (size_t)n) &&
+                 append_bytes(&out, ",\"notes\":", 9) && append_json_string(&out, (const char *)sqlite3_column_text(statement, 1)) &&
+                 append_bytes(&out, ",\"summary\":", 11) && append_bytes(&out, (const char *)sqlite3_column_text(statement, 2), strlen((const char *)sqlite3_column_text(statement, 2))) &&
+                 append_bytes(&out, ",\"created_at\":", 14) && append_json_string(&out, (const char *)sqlite3_column_text(statement, 3)) && append_bytes(&out, "}", 1);
+        }
+        sqlite3_finalize(statement); pthread_mutex_unlock(&database_mutex);
+    }
+    ok = ok && append_bytes(&out, "]}", 2);
+    if (!ok) { free(out.data); return -1; }
+    *bytes = (off_t)out.length;
+    bool sent = send_json(fd, 200, "OK", out.data, request->head_only, keep_alive, "Cache-Control: no-store");
+    free(out.data); return sent ? 200 : -1;
+}
+
 static int analysis_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
     if (strcmp(request->method, "POST")) {
         const char *body = "{\"error\":\"method not allowed\"}\n"; *bytes = (off_t)strlen(body);
@@ -724,9 +804,12 @@ static int analysis_route(int fd, http_request *request, bool keep_alive, off_t 
         *bytes = (off_t)strlen(body);
         return send_json(fd, 400, "Bad Request", body, false, keep_alive, NULL) ? 400 : -1;
     }
-    size_t count = 0, ascending = 0, descending = 0, repeated = 0;
+    char original_notes[2048]; memcpy(original_notes, notes, sizeof(original_notes));
+    size_t count = 0, ascending = 0, descending = 0, repeated = 0, steps = 0, leaps = 0;
+    long total_motion = 0;
     unsigned int pitch_classes = 0;
-    int lowest = 128, highest = -1, previous = -1;
+    int lowest = 128, highest = -1, previous = -1, climax_position = 0;
+    int midi_values[128]; unsigned int class_counts[12] = {0};
     char *save = NULL;
     for (char *token = strtok_r(notes, ", \t\r\n", &save); token;
          token = strtok_r(NULL, ", \t\r\n", &save)) {
@@ -740,10 +823,14 @@ static int analysis_route(int fd, http_request *request, bool keep_alive, off_t 
             if (midi > previous) ascending++;
             else if (midi < previous) descending++;
             else repeated++;
+            int distance = abs(midi - previous); total_motion += distance;
+            if (distance > 0 && distance <= 2) steps++;
+            else if (distance > 2) leaps++;
         }
         if (midi < lowest) lowest = midi;
-        if (midi > highest) highest = midi;
+        if (midi > highest) { highest = midi; climax_position = (int)count + 1; }
         pitch_classes |= 1U << pitch_class;
+        class_counts[pitch_class]++; midi_values[count] = midi;
         previous = midi; count++;
     }
     if (!count) {
@@ -755,15 +842,35 @@ static int analysis_route(int fd, http_request *request, bool keep_alive, off_t 
     for (unsigned int bits = pitch_classes; bits; bits >>= 1) distinct += bits & 1U;
     const char *contour = ascending > descending ? "predominantly ascending" :
                           descending > ascending ? "predominantly descending" : "balanced";
-    char body[512];
-    int length = snprintf(body, sizeof(body),
+    static const char *pitch_names[] = {"C","C#/Db","D","D#/Eb","E","F","F#/Gb","G","G#/Ab","A","A#/Bb","B"};
+    unsigned int center = 0;
+    for (unsigned int i = 1; i < 12; i++) if (class_counts[i] > class_counts[center]) center = i;
+    double average_motion = count > 1 ? (double)total_motion / (double)(count - 1) : 0.0;
+    char summary[1024];
+    int summary_length = snprintf(summary, sizeof(summary),
         "{\"note_count\":%zu,\"distinct_pitch_classes\":%u,\"lowest_midi\":%d,"
         "\"highest_midi\":%d,\"range_semitones\":%d,\"ascending\":%zu,"
-        "\"descending\":%zu,\"repeated\":%zu,\"contour\":\"%s\"}\n",
-        count, distinct, lowest, highest, highest - lowest, ascending, descending, repeated, contour);
-    if (length < 0 || (size_t)length >= sizeof(body)) return -1;
-    *bytes = (off_t)length;
-    return send_json(fd, 200, "OK", body, false, keep_alive, "Cache-Control: no-store") ? 200 : -1;
+        "\"descending\":%zu,\"repeated\":%zu,\"steps\":%zu,\"leaps\":%zu,"
+        "\"average_motion\":%.2f,\"climax_position\":%d,\"tonal_center\":\"%s\",\"contour\":\"%s\",\"midi\":[",
+        count, distinct, lowest, highest, highest - lowest, ascending, descending, repeated,
+        steps, leaps, average_motion, climax_position, pitch_names[center], contour);
+    if (summary_length < 0 || (size_t)summary_length >= sizeof(summary)) return -1;
+    string_buffer result = {0}; bool ok = append_bytes(&result, summary, (size_t)summary_length);
+    for (size_t i = 0; ok && i < count; i++) {
+        char value[16]; int n = snprintf(value, sizeof(value), "%s%d", i ? "," : "", midi_values[i]);
+        ok = n > 0 && append_bytes(&result, value, (size_t)n);
+    }
+    ok = ok && append_bytes(&result, "]}", 2);
+    if (!ok) { free(result.data); return -1; }
+    long long id = save_analysis(original_notes, result.data);
+    if (id > 0) {
+        result.length--; char suffix[64]; int n = snprintf(suffix, sizeof(suffix), ",\"id\":%lld}", id);
+        ok = n > 0 && append_bytes(&result, suffix, (size_t)n);
+    }
+    if (!ok) { free(result.data); return -1; }
+    *bytes = (off_t)result.length;
+    bool sent = send_json(fd, 200, "OK", result.data, false, keep_alive, "Cache-Control: no-store");
+    free(result.data); return sent ? 200 : -1;
 }
 
 static int users_route(int fd, http_request *request, bool keep_alive, off_t *bytes) {
@@ -1091,6 +1198,7 @@ static int serve_request(int fd, http_request *request, bool keep_alive, off_t *
         (!strncmp(route, "/users/", 7) && route[7] != '\0'))
         return users_route(fd, request, keep_alive, bytes);
     if (!strcmp(route, "/api/analyze")) return analysis_route(fd, request, keep_alive, bytes);
+    if (!strcmp(route, "/api/analyses")) return analyses_route(fd, request, keep_alive, bytes);
     if (!strcmp(route, "/health")) {
         if (strcmp(request->method, "GET") && strcmp(request->method, "HEAD")) {
             const char *body = "Method not allowed.\n"; *bytes = (off_t)strlen(body);
@@ -1311,12 +1419,37 @@ int main(int argc, char **argv) {
         sqlite3_exec(database, "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS notes("
                      "id INTEGER PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"
                      "CREATE TABLE IF NOT EXISTS users("
-                     "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+                     "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+                     "CREATE TABLE IF NOT EXISTS analyses("
+                     "id INTEGER PRIMARY KEY AUTOINCREMENT, notes TEXT NOT NULL, summary TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
                      NULL, NULL, NULL) != SQLITE_OK) {
         fprintf(stderr, "database: %s\n", database ? sqlite3_errmsg(database) : "could not open");
         if (database) sqlite3_close(database);
         return EXIT_FAILURE;
     }
+#ifdef HAVE_LIBPQ
+    const char *database_url = getenv("DATABASE_URL");
+    if (database_url && *database_url) {
+        neon_database = PQconnectdb(database_url);
+        if (PQstatus(neon_database) != CONNECTION_OK) {
+            fprintf(stderr, "Neon connection failed: %s", PQerrorMessage(neon_database));
+            PQfinish(neon_database); neon_database = NULL;
+            sqlite3_close(database); return EXIT_FAILURE;
+        }
+        PGresult *migration = PQexec(neon_database,
+            "CREATE TABLE IF NOT EXISTS analyses (id BIGSERIAL PRIMARY KEY, notes TEXT NOT NULL, "
+            "summary JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+        if (PQresultStatus(migration) != PGRES_COMMAND_OK) {
+            fprintf(stderr, "Neon migration failed: %s", PQerrorMessage(neon_database));
+            PQclear(migration); PQfinish(neon_database); neon_database = NULL;
+            sqlite3_close(database); return EXIT_FAILURE;
+        }
+        PQclear(migration);
+        fprintf(stderr, "Persistent analysis storage: Neon PostgreSQL\n");
+    } else {
+        fprintf(stderr, "Persistent analysis storage: SQLite (DATABASE_URL not set)\n");
+    }
+#endif
     access_log = !strcmp(config.log_file, "-") ? stdout : fopen(config.log_file, "a");
     if (!access_log) { perror(config.log_file); return EXIT_FAILURE; }
     if (!queue_init()) { perror("queue_init"); return EXIT_FAILURE; }
@@ -1353,6 +1486,9 @@ int main(int argc, char **argv) {
     free(workers); free(queue.items);
     pthread_cond_destroy(&queue.not_empty); pthread_mutex_destroy(&queue.mutex);
     if (access_log != stdout) fclose(access_log);
+#ifdef HAVE_LIBPQ
+    if (neon_database) PQfinish(neon_database);
+#endif
     sqlite3_close(database);
     return started == config.threads ? EXIT_SUCCESS : EXIT_FAILURE;
 }

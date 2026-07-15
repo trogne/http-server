@@ -1,6 +1,6 @@
 FROM gcc:14-bookworm AS build
 WORKDIR /src
-RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev libpq-dev && rm -rf /var/lib/apt/lists/*
 COPY server.c Makefile ./
 COPY client.c ./
 COPY tests/ tests/
@@ -23,7 +23,7 @@ RUN apt-get update \
 CMD ["make", "benchmark"]
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 libpq5 && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --no-create-home server
 COPY --from=build /src/http_server /usr/local/bin/http_server
 COPY --from=build /src/tcp_client /usr/local/bin/tcp_client

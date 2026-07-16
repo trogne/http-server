@@ -1,0 +1,354 @@
+/* Cinematic visual layer for FisoBach. Keeps the existing workbench intact. */
+:root {
+  --ivory:#f5ead3;
+  --ivory-soft:#cfc2aa;
+  --gold-bright:#f0c978;
+  --gold-deep:#8d6228;
+  --wine:#4b1721;
+  --night:#080706;
+  --glass:rgba(18,15,11,.72);
+}
+
+body {
+  overflow-x:hidden;
+  background:
+    radial-gradient(circle at 12% 5%,rgba(114,34,45,.22),transparent 26rem),
+    radial-gradient(circle at 88% 14%,rgba(202,164,93,.12),transparent 32rem),
+    linear-gradient(180deg,#090806 0%,#12100c 34%,#090806 100%);
+}
+
+body::before {
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:-2;
+  pointer-events:none;
+  opacity:.15;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+}
+
+body::after {
+  content:"𝄞";
+  position:fixed;
+  right:-.08em;
+  top:18vh;
+  z-index:-1;
+  color:rgba(240,201,120,.028);
+  font:400 min(52vw,44rem)/1 Georgia,serif;
+  transform:rotate(-7deg);
+  pointer-events:none;
+}
+
+.site-header {
+  height:88px;
+  border-bottom:1px solid rgba(240,201,120,.18);
+  background:linear-gradient(180deg,rgba(8,7,6,.94),rgba(8,7,6,.72));
+  box-shadow:0 20px 70px rgba(0,0,0,.28);
+}
+
+.brand-mark {
+  position:relative;
+  border-color:var(--gold-bright);
+  box-shadow:0 0 0 1px rgba(240,201,120,.1),0 0 30px rgba(240,201,120,.12);
+}
+
+.brand-mark::after {
+  content:"";
+  position:absolute;
+  inset:5px;
+  border:1px solid rgba(240,201,120,.45);
+}
+
+main { width:min(1320px,calc(100% - 48px)); }
+
+.hero {
+  min-height:calc(100svh - 88px);
+  width:100vw;
+  margin-left:calc(50% - 50vw);
+  padding-left:max(24px,calc((100vw - 1320px)/2));
+  padding-right:max(24px,calc((100vw - 1320px)/2));
+  border-bottom:1px solid rgba(240,201,120,.24);
+}
+
+.hero::after {
+  content:"BWV · COUNTERPOINT · MEMORY · ATTENTION";
+  position:absolute;
+  left:max(24px,calc((100vw - 1320px)/2));
+  bottom:24px;
+  z-index:3;
+  color:rgba(245,234,211,.36);
+  font:500 .58rem "DM Mono",monospace;
+  letter-spacing:.34em;
+}
+
+.hero>div {
+  width:min(760px,68%);
+  padding-left:0;
+}
+
+.hero-copy::before {
+  content:"";
+  display:block;
+  width:82px;
+  height:1px;
+  margin-bottom:30px;
+  background:linear-gradient(90deg,var(--gold-bright),transparent);
+  box-shadow:0 0 18px rgba(240,201,120,.5);
+}
+
+.hero-image::after {
+  background:
+    linear-gradient(90deg,#080706 1%,rgba(8,7,6,.98) 25%,rgba(8,7,6,.64) 58%,rgba(8,7,6,.16) 100%),
+    linear-gradient(0deg,rgba(8,7,6,.82),transparent 35%);
+}
+
+.hero-image img {
+  filter:saturate(.72) sepia(.16) contrast(1.08) brightness(.78);
+  animation:hero-breathe 16s ease-in-out infinite alternate;
+}
+
+@keyframes hero-breathe {
+  from { transform:scale(1.025) translate3d(0,0,0); }
+  to { transform:scale(1.075) translate3d(-1.2%,.8%,0); }
+}
+
+.eyebrow {
+  display:inline-flex;
+  align-items:center;
+  gap:14px;
+  padding:8px 12px;
+  border:1px solid rgba(240,201,120,.24);
+  background:rgba(8,7,6,.32);
+  backdrop-filter:blur(12px);
+}
+
+h1 {
+  max-width:900px;
+  font-size:clamp(4.3rem,8.8vw,9rem);
+  line-height:.79;
+  letter-spacing:-.06em;
+  color:var(--ivory);
+}
+
+.hero-copy h1::first-line { color:#fff7e8; }
+
+.lede {
+  max-width:690px;
+  color:var(--ivory-soft);
+  font-size:clamp(1rem,1.5vw,1.24rem);
+  border-left:1px solid rgba(240,201,120,.42);
+  padding-left:22px;
+}
+
+.hero-cta,
+.nav-contact,
+.analyze {
+  position:relative;
+  overflow:hidden;
+}
+
+.hero-cta::before,
+.nav-contact::before,
+.analyze::before {
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(105deg,transparent 25%,rgba(255,255,255,.22) 48%,transparent 70%);
+  transform:translateX(-130%);
+  transition:transform .65s ease;
+}
+
+.hero-cta:hover::before,
+.nav-contact:hover::before,
+.analyze:hover::before { transform:translateX(130%); }
+
+.method,.invitation,.studio,.results,.archive { padding:118px 0; }
+
+.method-intro,.studio-top>div,.section-heading>div { position:relative; }
+.method-intro::after,.studio-top>div::after,.section-heading>div::after {
+  content:"";
+  position:absolute;
+  left:0;
+  bottom:-22px;
+  width:64px;
+  height:1px;
+  background:var(--gold-bright);
+  box-shadow:0 0 14px rgba(240,201,120,.45);
+}
+
+.method-image {
+  height:clamp(430px,60vw,720px);
+  border-color:rgba(240,201,120,.22);
+  box-shadow:0 40px 120px rgba(0,0,0,.42);
+}
+
+.method-image::before {
+  content:"VOICE I  ·  VOICE II  ·  BASS  ·  THE SPACE BETWEEN";
+  position:absolute;
+  top:22px;
+  right:24px;
+  z-index:2;
+  color:rgba(245,234,211,.58);
+  font:500 .56rem "DM Mono",monospace;
+  letter-spacing:.2em;
+}
+
+.practice-steps {
+  border-color:rgba(240,201,120,.2);
+  background:linear-gradient(145deg,rgba(255,255,255,.025),rgba(202,164,93,.02));
+  box-shadow:0 24px 70px rgba(0,0,0,.22);
+}
+
+.practice-steps article { position:relative; overflow:hidden; }
+.practice-steps article::after {
+  content:attr(data-ghost);
+  position:absolute;
+  right:14px;
+  bottom:-.22em;
+  color:rgba(240,201,120,.04);
+  font:400 9rem/1 "Libre Caslon Display",Georgia,serif;
+}
+.practice-steps article:nth-child(1)::after { content:"I"; }
+.practice-steps article:nth-child(2)::after { content:"II"; }
+.practice-steps article:nth-child(3)::after { content:"III"; }
+
+.method-result {
+  background:linear-gradient(110deg,rgba(75,23,33,.42),rgba(202,164,93,.05));
+  box-shadow:inset 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.2);
+}
+
+.invitation {
+  width:100vw;
+  margin-left:calc(50% - 50vw);
+  padding-left:max(24px,calc((100vw - 1120px)/2));
+  padding-right:max(24px,calc((100vw - 1120px)/2));
+  background:
+    linear-gradient(rgba(8,7,6,.76),rgba(8,7,6,.88)),
+    url('/images/bach-score-study.png') center 38%/cover fixed;
+  border-block:1px solid rgba(240,201,120,.18);
+}
+
+.invitation h2 { color:#fff6e4; text-shadow:0 18px 60px #000; }
+.invitation>a { backdrop-filter:blur(14px); background:rgba(8,7,6,.44); }
+
+.studio {
+  position:relative;
+  isolation:isolate;
+}
+
+.studio::before {
+  content:"";
+  position:absolute;
+  inset:45px -80px;
+  z-index:-1;
+  border:1px solid rgba(240,201,120,.08);
+  background:radial-gradient(circle at 50% 0,rgba(202,164,93,.07),transparent 45%);
+  transform:skewY(-1.4deg);
+}
+
+.studio form {
+  border-color:rgba(240,201,120,.28);
+  background:linear-gradient(145deg,rgba(21,18,13,.98),rgba(8,7,6,.98));
+  box-shadow:0 45px 140px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.035);
+}
+
+textarea {
+  min-height:240px;
+  background:
+    repeating-linear-gradient(180deg,transparent 0,transparent 2.18rem,rgba(240,201,120,.05) 2.2rem,transparent 2.23rem);
+  text-shadow:0 0 18px rgba(240,201,120,.08);
+}
+
+.voice-console { background:rgba(10,9,7,.78); }
+.transport button { backdrop-filter:blur(10px); }
+.transport button.playing { animation:playing-pulse 1.25s ease-in-out infinite alternate; }
+@keyframes playing-pulse { to { box-shadow:0 0 32px rgba(240,201,120,.25); } }
+
+.example-list button {
+  border-radius:0;
+  background:linear-gradient(145deg,rgba(255,255,255,.018),transparent);
+}
+.example-list button:hover,.example-list button.selected {
+  background:linear-gradient(145deg,rgba(75,23,33,.42),rgba(202,164,93,.08));
+  box-shadow:inset 3px 0 var(--gold-bright);
+}
+
+.results:not(.hidden) { animation:results-arrive .9s cubic-bezier(.16,1,.3,1) both; }
+@keyframes results-arrive { from { opacity:0; transform:translateY(36px); } }
+
+.metric-grid article,.chart-card,.motion-card,.insight {
+  border-color:rgba(240,201,120,.18);
+  background:linear-gradient(145deg,rgba(255,255,255,.028),rgba(202,164,93,.015));
+  box-shadow:0 24px 70px rgba(0,0,0,.18);
+}
+
+.metric-grid article { transition:transform .3s ease,border-color .3s ease,box-shadow .3s ease; }
+.metric-grid article:hover {
+  transform:translateY(-7px);
+  border-color:rgba(240,201,120,.55);
+  box-shadow:0 34px 90px rgba(0,0,0,.3),0 0 34px rgba(240,201,120,.06);
+}
+
+.chart-card { overflow:hidden; }
+#contour { filter:drop-shadow(0 8px 18px rgba(0,0,0,.28)); }
+.texture-voice.is-focus { filter:drop-shadow(0 0 8px rgba(240,205,131,.7)); }
+
+.history-item { transition:transform .25s ease,background .25s ease,border-color .25s ease; }
+.history-item:hover { transform:translateX(8px); background:linear-gradient(90deg,rgba(75,23,33,.34),transparent); }
+
+footer {
+  position:relative;
+  min-height:160px;
+  background:#070605;
+  border-top:1px solid rgba(240,201,120,.2);
+}
+footer::before {
+  content:"SOLI DEO GLORIA";
+  position:absolute;
+  left:50%;
+  top:22px;
+  transform:translateX(-50%);
+  color:rgba(240,201,120,.12);
+  font:400 clamp(2.4rem,6vw,6rem)/1 "Libre Caslon Display",Georgia,serif;
+  white-space:nowrap;
+}
+
+.reveal-ready [data-reveal] {
+  opacity:0;
+  transform:translateY(34px);
+  transition:opacity .9s cubic-bezier(.16,1,.3,1),transform .9s cubic-bezier(.16,1,.3,1);
+}
+.reveal-ready [data-reveal].is-visible { opacity:1; transform:none; }
+
+.cursor-glow {
+  position:fixed;
+  width:360px;
+  height:360px;
+  z-index:-1;
+  left:0;
+  top:0;
+  border-radius:50%;
+  pointer-events:none;
+  background:radial-gradient(circle,rgba(240,201,120,.075),transparent 66%);
+  transform:translate(-50%,-50%);
+  transition:opacity .25s ease;
+}
+
+@media (max-width:820px) {
+  main { width:min(100% - 28px,1320px); }
+  .site-header { height:72px; }
+  .hero { min-height:760px; padding-inline:20px; }
+  .hero>div { width:100%; padding-top:80px; }
+  .hero-image::after { background:linear-gradient(0deg,#080706 3%,rgba(8,7,6,.9) 58%,rgba(8,7,6,.42)); }
+  h1 { font-size:clamp(4rem,19vw,7rem); }
+  .hero::after { left:20px; right:20px; line-height:1.8; }
+  .method,.invitation,.studio,.results,.archive { padding-block:82px; }
+  .invitation { background-attachment:scroll; }
+  .cursor-glow { display:none; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .hero-image img,.transport button.playing { animation:none; }
+  .reveal-ready [data-reveal] { opacity:1; transform:none; transition:none; }
+  .cursor-glow { display:none; }
+}

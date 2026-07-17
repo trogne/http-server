@@ -204,6 +204,7 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .note-stem { stroke-width:1.8!important; }
 .note-flag { fill:#201c16; stroke:none!important; }
 .note-beam { fill:#201c16; }
+.note-tie { fill:none; stroke:#201c16; stroke-width:1.65; stroke-linecap:round; }
 .tuplet-mark path { fill:none; stroke:#342b20; stroke-width:1.25; }
 .tuplet-mark text { fill:#342b20; font:italic 600 15px Georgia,serif; text-anchor:middle; }
 .rest-glyph { fill:#201c16; font:48px "Noto Music","Segoe UI Symbol","Apple Symbols",serif; text-anchor:middle; dominant-baseline:central; }

@@ -32,6 +32,8 @@ def main():
     assert "voice.notes='R/1'" not in APP, "Clear voice must not insert a fake rest"
     assert "||'R/1'" not in APP, "deleting the final event must keep the voice empty"
     assert "Empty voice · choose a note or rest" in APP, "empty staff guidance is missing"
+    assert "engravingSegments(events,meterLength)" in APP, "bar-aware engraving is missing"
+    assert 'class=\"note-tie\"' in APP, "cross-bar notes must display ties"
 
     print("Frontend score-editor regression checks passed.")
 

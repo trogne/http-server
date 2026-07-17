@@ -63,9 +63,26 @@ const eventDurationLabel = event => durationLabel(event.notatedDuration ?? event
 const selectedDurationLabel = () => durationLabel(notationState.duration,notationState.triplet);
 const durationToken = () => `${notationState.duration}${notationState.triplet?'t':''}`;
 const flagCount = duration => ({'0.5':1,'0.25':2,'0.125':3,'0.0625':4}[String(duration)]||0);
+const standardDurations = [4,2,1,.5,.25,.125,.0625];
 const meterParts = () => notationState.timeSignature.split('/').map(Number);
 const measureBeats = () => { const [count,value]=meterParts(); return count*4/value; };
 const meterPulse = () => meterParts()[1]===8?'Eighth-note pulse':'Quarter-note pulse';
+
+function engravingSegments(events,meterLength) {
+  const epsilon=.000001,result=[];
+  events.forEach((sourceEvent,sourceEventIndex)=>{
+    let cursor=sourceEvent.start,remaining=sourceEvent.duration;const pieces=[];
+    while(remaining>epsilon){
+      let position=((cursor%meterLength)+meterLength)%meterLength;if(position<epsilon||meterLength-position<epsilon)position=0;
+      const room=meterLength-position,barSpan=Math.min(remaining,room);
+      if(sourceEvent.tuplet){pieces.push({...sourceEvent,start:cursor,duration:barSpan,notatedDuration:barSpan*1.5});cursor+=barSpan;remaining-=barSpan;continue;}
+      let span=barSpan;
+      while(span>epsilon){const value=standardDurations.find(duration=>duration<=span+epsilon)||span;pieces.push({...sourceEvent,start:cursor,duration:value,notatedDuration:value,tuplet:false});cursor+=value;remaining-=value;span-=value;}
+    }
+    pieces.forEach((event,index)=>result.push({...event,sourceEvent,sourceEventIndex,continuation:index>0,continues:index<pieces.length-1}));
+  });
+  return result;
+}
 
 function setScoreSource(voices) {
   notes.value = voices.map(voice => `${voice.name}:${voice.notes?` ${voice.notes}`:''}`).join('\n');
@@ -96,11 +113,11 @@ function renderScoreEditor() {
   const selectedTimeline=timelines[notationState.voice]||[],[meterCount,meterValue]=meterParts();$('measure-count').textContent=notationState.measures;$('remove-measure').disabled=notationState.measures<=requiredMeasures;$('remove-voice').disabled=voices.length<=1;$('delete-event').disabled=!notationState.selectedEvent;$('undo-note').disabled=!selectedTimeline.length;$('clear-voice').disabled=!selectedTimeline.length;$('voice-name').value=voices[notationState.voice]?.name||'';$('voice-clef').value=notationState.clefs[notationState.voice]||'auto';$('score-summary').innerHTML=`<strong>${notationState.measures} measure${notationState.measures===1?'':'s'} · ${notationState.timeSignature}</strong><span>${selectedTimeline.length?`${selectedTimeline.length} event${selectedTimeline.length===1?'':'s'} in ${escapeText(voices[notationState.voice].name)}`:'Empty voice · choose a value and begin'}</span>`;
   svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.style.width=`${Math.max(100,width/12)}%`;svg.style.height=`${height}px`;svg.setAttribute('tabindex','0');
   const systems=voices.map((voice,voiceIndex)=>{
-    const events=timelines[voiceIndex],sounded=events.filter(event=>!event.rest),averageMidi=sounded.length?sounded.reduce((sum,event)=>sum+event.midi,0)/sounded.length:64,clefChoice=notationState.clefs[voiceIndex]||'auto',bassClef=clefChoice==='bass'||(clefChoice==='auto'&&averageMidi<60),staffBase=bassClef?pitchIndex('G',2):pitchIndex('E',4),staffTop=42+voiceIndex*staffGap,staffBottom=staffTop+72,selected=voiceIndex===notationState.voice;
+    const events=timelines[voiceIndex],displayEvents=engravingSegments(events,meterLength),sounded=events.filter(event=>!event.rest),averageMidi=sounded.length?sounded.reduce((sum,event)=>sum+event.midi,0)/sounded.length:64,clefChoice=notationState.clefs[voiceIndex]||'auto',bassClef=clefChoice==='bass'||(clefChoice==='auto'&&averageMidi<60),staffBase=bassClef?pitchIndex('G',2):pitchIndex('E',4),staffTop=42+voiceIndex*staffGap,staffBottom=staffTop+72,selected=voiceIndex===notationState.voice;
     const staff=Array.from({length:5},(_,i)=>`<line x1="108" y1="${staffTop+i*18}" x2="${endBarX}" y2="${staffTop+i*18}"/>`).join('');
     const measureStarts=Array.from({length:notationState.measures},(_,i)=>i*meterLength),bars=measureStarts.map((beat,i)=>{const x=barStart+beat*beatWidth;return `<line class="barline" x1="${x}" y1="${staffTop}" x2="${x}" y2="${staffBottom}"/>${voiceIndex===0?`<text class="measure-number" x="${x+7}" y="${staffTop-13}">${i+1}</text>`:''}`;}).join('');
     const noteX=start=>{const measure=Math.floor(start/meterLength),within=start-measure*meterLength,measureWidth=meterLength*beatWidth;return barStart+measure*measureWidth+30+within*((measureWidth-60)/meterLength);};
-    const layouts=events.map(event=>{const x=noteX(event.start+(event.rest?event.duration/2:0)),bare=event.note.replace(/[#b]/,''),match=bare.match(/^([A-G])(\-?\d)$/i),y=event.rest?(staffTop+staffBottom)/2:staffBottom-(pitchIndex(match[1].toUpperCase(),Number(match[2]))-staffBase)*9;return{event,x,y,options:{}};});
+    const layouts=displayEvents.map(event=>{const x=noteX(event.start+(event.rest?event.duration/2:0)),bare=event.note.replace(/[#b]/,''),match=bare.match(/^([A-G])(\-?\d)$/i),y=event.rest?(staffTop+staffBottom)/2:staffBottom-(pitchIndex(match[1].toUpperCase(),Number(match[2]))-staffBase)*9;return{event,x,y,options:{}};});
     const beams=[];
     for(let i=0;i<layouts.length;){
       const first=layouts[i],count=flagCount(first.event.notatedDuration);if(first.event.rest||!count){i++;continue;}
@@ -113,8 +130,9 @@ function renderScoreEditor() {
       i=run.at(-1)+1;
     }
     const tuplets=[];for(let i=0;i<layouts.length;){if(!layouts[i].event.tuplet){i++;continue;}const group=[i];while(group.length<3&&i+group.length<layouts.length){const previous=layouts[group.at(-1)].event,next=layouts[i+group.length].event;if(!next.tuplet||next.notatedDuration!==previous.notatedDuration||Math.abs(previous.start+previous.duration-next.start)>.001)break;group.push(i+group.length);}const first=layouts[group[0]],last=layouts[group.at(-1)],bracketY=Math.max(10,Math.min(staffTop-13,...group.map(index=>layouts[index].y-58))),left=first.x-11,right=last.x+11,middle=(left+right)/2;tuplets.push(`<g class="tuplet-mark" aria-label="Triplet group"><path d="M${left} ${bracketY+7}V${bracketY}H${middle-9} M${middle+9} ${bracketY}H${right}V${bracketY+7}"/><text x="${middle}" y="${bracketY+4}">3</text></g>`);i=group.at(-1)+1;}
-    const marks=layouts.map(({event,x,y,options},eventIndex)=>`<g class="score-event${notationState.selectedEvent?.voice===voiceIndex&&notationState.selectedEvent?.event===eventIndex?' selected-event':''}" data-event-voice="${voiceIndex}" data-event-index="${eventIndex}"><title>${escapeText(voice.name)}, beat ${event.start+1}: ${event.rest?'rest':event.note}, ${eventDurationLabel(event)}</title>${notationEventSvg(event,x,y,staffTop,staffBottom,options)}</g>`).join('')||`<text class="empty-staff-message" x="${barStart+30}" y="${staffTop-13}">Empty voice · choose a note or rest, then click the staff</text>`;
-    return `<g class="score-system${selected?' selected-system':''}" data-system="${voiceIndex}"><rect class="staff-selector" x="0" y="${staffTop-30}" width="${width}" height="${staffGap-5}"/><text class="staff-name" x="52" y="${staffTop+41}" text-anchor="end">${escapeText(voice.name)}</text><g class="staff-lines">${staff}</g><text class="${bassClef?'bass-clef':'treble-clef'}" x="114" y="${bassClef?staffTop+58:staffTop+69}">${bassClef?'𝄢':'𝄞'}</text><text class="time-signature" x="176" y="${staffTop+29}">${meterCount}</text><text class="time-signature" x="176" y="${staffTop+65}">${meterValue}</text><g class="measure-lines">${bars}</g>${marks}${beams.join('')}${tuplets.join('')}<line class="end-bar-thin" x1="${endBarX-5}" y1="${staffTop}" x2="${endBarX-5}" y2="${staffBottom}"/><line class="end-bar" x1="${endBarX}" y1="${staffTop}" x2="${endBarX}" y2="${staffBottom}"/></g>`;
+    const ties=[];for(let i=0;i<layouts.length-1;i++){const a=layouts[i],b=layouts[i+1];if(a.event.rest||a.event.sourceEventIndex!==b.event.sourceEventIndex)continue;const stemUp=a.options.stemUp??a.y>=(staffTop+staffBottom)/2,direction=stemUp?1:-1,startX=a.x+8,endX=b.x-8,tieY=a.y+direction*10,curve=direction*9;ties.push(`<path class="note-tie" d="M${startX} ${tieY} C ${startX+(endX-startX)*.28} ${tieY+curve}, ${startX+(endX-startX)*.72} ${tieY+curve}, ${endX} ${tieY}"/>`);}
+    const marks=layouts.map(({event,x,y,options})=>`<g class="score-event${notationState.selectedEvent?.voice===voiceIndex&&notationState.selectedEvent?.event===event.sourceEventIndex?' selected-event':''}" data-event-voice="${voiceIndex}" data-event-index="${event.sourceEventIndex}"><title>${escapeText(voice.name)}, beat ${event.start+1}: ${event.rest?'rest':event.note}, ${eventDurationLabel(event.sourceEvent)}${event.continuation||event.continues?' (tied across the barline)':''}</title>${notationEventSvg(event,x,y,staffTop,staffBottom,options)}</g>`).join('')||`<text class="empty-staff-message" x="${barStart+30}" y="${staffTop-13}">Empty voice · choose a note or rest, then click the staff</text>`;
+    return `<g class="score-system${selected?' selected-system':''}" data-system="${voiceIndex}"><rect class="staff-selector" x="0" y="${staffTop-30}" width="${width}" height="${staffGap-5}"/><text class="staff-name" x="52" y="${staffTop+41}" text-anchor="end">${escapeText(voice.name)}</text><g class="staff-lines">${staff}</g><text class="${bassClef?'bass-clef':'treble-clef'}" x="114" y="${bassClef?staffTop+58:staffTop+69}">${bassClef?'𝄢':'𝄞'}</text><text class="time-signature" x="176" y="${staffTop+29}">${meterCount}</text><text class="time-signature" x="176" y="${staffTop+65}">${meterValue}</text><g class="measure-lines">${bars}</g>${marks}${beams.join('')}${ties.join('')}${tuplets.join('')}<line class="end-bar-thin" x1="${endBarX-5}" y1="${staffTop}" x2="${endBarX-5}" y2="${staffBottom}"/><line class="end-bar" x1="${endBarX}" y1="${staffTop}" x2="${endBarX}" y2="${staffBottom}"/></g>`;
   }).join('');
   const firstTop=42,lastBottom=42+(voices.length-1)*staffGap+72;
   const middle=(firstTop+lastBottom)/2,span=lastBottom-firstTop;

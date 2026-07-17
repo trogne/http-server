@@ -30,7 +30,7 @@ main { width:min(1180px,calc(100% - 40px)); margin:auto; }
 .hero::before { content:""; position:absolute; z-index:1; width:420px; height:420px; left:-260px; bottom:-210px; border:1px solid rgba(202,164,93,.16); border-radius:50%; box-shadow:0 0 0 70px rgba(202,164,93,.025),0 0 0 140px rgba(202,164,93,.018); pointer-events:none; }
 .hero>div { position:relative; z-index:2; width:min(650px,61%); padding:60px 0 60px 35px; }
 .hero-image { position:absolute; inset:0; z-index:-1; margin:0; }
-.hero-image::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,#0d0c09 5%,rgba(13,12,9,.96) 31%,rgba(13,12,9,.43) 67%,rgba(13,12,9,.08)); }
+.hero-image::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,#0d0c09 5%,rgba(13,12,9,.96) 31%,rgba(13,12,9,.52) 43%,rgba(13,12,9,.1) 61%,rgba(13,12,9,.04)); }
 .hero-image img { width:100%; height:100%; display:block; object-fit:cover; transform:scale(1.025); animation:hero-settle 1.8s cubic-bezier(.2,.7,.2,1) both; }
 @keyframes hero-settle { from { opacity:.35; transform:scale(1.08); } to { opacity:1; transform:scale(1.025); } }
 .hero-image figcaption { position:absolute; right:22px; bottom:18px; z-index:1; color:rgba(233,226,212,.63); font:500 .58rem "DM Mono",monospace; letter-spacing:.1em; text-transform:uppercase; }
@@ -71,9 +71,9 @@ h1 { max-width:800px; margin:.5rem 0 1.4rem; font:400 clamp(3.4rem,7.2vw,6.8rem)
 .method-intro h2 { font-size:clamp(2.8rem,5vw,5rem); line-height:.95; }
 .method-story { padding-top:26px; color:#aaa396; font-size:.96rem; line-height:1.85; }
 .method-story .lead-story { color:#d8d0c1; font:400 1.35rem/1.6 "Libre Caslon Display",Georgia,serif; }
-.method-image { grid-column:1/-1; position:relative; margin:28px 0 8px; height:clamp(320px,48vw,570px); overflow:hidden; border:1px solid var(--line); }
-.method-image::after { content:""; position:absolute; inset:0; background:linear-gradient(0deg,rgba(10,9,7,.92),transparent 47%); pointer-events:none; }
-.method-image img { width:100%; height:100%; display:block; object-fit:cover; object-position:center 54%; filter:saturate(.76) contrast(1.04); transition:transform 1.2s ease; }
+.method-image { grid-column:1/-1; position:relative; margin:28px 0 8px; height:clamp(520px,72vw,820px); overflow:hidden; border:1px solid var(--line); }
+.method-image::after { content:""; position:absolute; inset:0; background:linear-gradient(0deg,rgba(10,9,7,.82),transparent 38%); pointer-events:none; }
+.method-image img { width:100%; height:100%; display:block; object-fit:cover; object-position:center 48%; filter:saturate(.82) contrast(1.08) brightness(1.06); transition:transform 1.2s ease; }
 .method-image:hover img { transform:scale(1.015); }
 .method-image figcaption { position:absolute; z-index:1; left:28px; bottom:24px; max-width:520px; color:#d8d0c1; font:400 1rem/1.5 "Libre Caslon Display",Georgia,serif; }
 .method-image figcaption span { display:block; margin-bottom:5px; color:var(--gold); font:500 .58rem "DM Mono",monospace; letter-spacing:.17em; }

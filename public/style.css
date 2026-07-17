@@ -164,6 +164,7 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .open-note-head .note-cutout { fill:#e5dbc4; stroke:none; }
 .note-stem { stroke-width:1.8!important; }
 .note-flag { fill:none; stroke:#201c16; stroke-width:3.2; stroke-linecap:round; stroke-linejoin:round; }
+.note-beam { fill:#201c16; }
 .rest-glyph { fill:#201c16; font:48px "Noto Music","Segoe UI Symbol","Apple Symbols",serif; text-anchor:middle; dominant-baseline:central; }
 .score-accidental { fill:#201c16; font:31px "Bravura Text","Noto Music",Georgia,serif; text-anchor:middle; }
 .end-bar { stroke-width:4; }

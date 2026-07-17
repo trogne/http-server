@@ -64,17 +64,17 @@ function setScoreSource(voices) {
   syncVoices(); markResultsStale();
 }
 
-function notationEventSvg(event,x,y,staffTop,staffBottom) {
-  const duration=event.duration,up=y>=(staffTop+staffBottom)/2,stemX=up?x+7:x-7,stemEnd=up?y-42:y+42;
+function notationEventSvg(event,x,y,staffTop,staffBottom,options={}) {
+  const duration=event.duration,up=options.stemUp??y>=(staffTop+staffBottom)/2,stemX=up?x+7:x-7,stemEnd=options.stemEnd??(up?y-42:y+42);
   if(event.rest){
-    const rests={'.5':['𝄾','eighth',10],1:['𝄽','quarter',10],2:['𝄼','half',5],4:['𝄻','whole',5]},[glyph,label,offset]=rests[String(duration)]||rests[1];
+    const rests={'.5':['𝄾','eighth',2],1:['𝄽','quarter',2],2:['𝄼','half',5],4:['𝄻','whole',0]},[glyph,label,offset]=rests[String(duration)]||rests[1];
     return `<text class="rest-glyph rest-${label}" x="${x}" y="${(staffTop+staffBottom)/2+offset}" aria-label="${label} rest">${glyph}</text>`;
   }
   const ledger=[];for(let ly=staffBottom+18;ly<=y+2;ly+=18)ledger.push(`<line x1="${x-14}" x2="${x+14}" y1="${ly}" y2="${ly}"/>`);for(let ly=staffTop-18;ly>=y-2;ly-=18)ledger.push(`<line x1="${x-14}" x2="${x+14}" y1="${ly}" y2="${ly}"/>`);
   const accidental=event.note.includes('#')?'♯':event.note.includes('b')?'♭':'';
   const open=duration>=2,head=open?`<g class="open-note-head" transform="rotate(-18 ${x} ${y})"><ellipse cx="${x}" cy="${y}" rx="9.5" ry="6.8"/><ellipse class="note-cutout" cx="${x}" cy="${y}" rx="5.4" ry="3.5"/></g>`:`<ellipse cx="${x}" cy="${y}" rx="9" ry="6.5" transform="rotate(-18 ${x} ${y})" class="note-head"/>`;
   const stem=duration===4?'':`<line class="note-stem" x1="${stemX}" y1="${y}" x2="${stemX}" y2="${stemEnd}"/>`;
-  const flag=duration===.5?`<path class="note-flag" d="M${stemX} ${stemEnd}q20 ${up?8:-8} 12 ${up?25:-25}"/>`:'';
+  const flag=duration===.5&&!options.beamed?`<path class="note-flag" d="M${stemX} ${stemEnd}q20 ${up?8:-8} 12 ${up?25:-25}"/>`:'';
   return `<g class="engraved note-mark" aria-label="${event.note}, ${durationLabel(duration)} note">${ledger.join('')}${accidental?`<text class="score-accidental" x="${x-22}" y="${y+7}">${accidental}</text>`:''}${stem}${flag}${head}</g>`;
 }
 
@@ -90,8 +90,10 @@ function renderScoreEditor() {
     const staff=Array.from({length:5},(_,i)=>`<line x1="108" y1="${staffTop+i*18}" x2="${endBarX}" y2="${staffTop+i*18}"/>`).join('');
     const measureStarts=Array.from({length:displayBeats/4},(_,i)=>i*4),bars=measureStarts.map((beat,i)=>{const x=barStart+beat*beatWidth;return `<line class="barline" x1="${x}" y1="${staffTop}" x2="${x}" y2="${staffBottom}"/>${voiceIndex===0?`<text class="measure-number" x="${x+7}" y="${staffTop-13}">${i+1}</text>`:''}`;}).join('');
     const noteX=start=>{const measure=Math.floor(start/4),within=start-measure*4;return barStart+measure*4*beatWidth+34+within*(beatWidth-17);};
-    const marks=events.map(event=>{const x=noteX(event.start),bare=event.note.replace(/[#b]/,''),match=bare.match(/^([A-G])(\-?\d)$/i),y=event.rest?(staffTop+staffBottom)/2:staffBottom-(pitchIndex(match[1].toUpperCase(),Number(match[2]))-staffBase)*9;return `<g class="score-event"><title>${escapeText(voice.name)}, beat ${event.start+1}: ${event.rest?'rest':event.note}, ${durationLabel(event.duration)}</title>${notationEventSvg(event,x,y,staffTop,staffBottom)}</g>`;}).join('');
-    return `<g class="score-system${selected?' selected-system':''}" data-system="${voiceIndex}"><rect class="staff-selector" x="0" y="${staffTop-30}" width="${width}" height="${staffGap-5}"/><text class="staff-name" x="52" y="${staffTop+41}" text-anchor="end">${escapeText(voice.name)}</text><g class="staff-lines">${staff}</g><text class="${bassClef?'bass-clef':'treble-clef'}" x="114" y="${bassClef?staffTop+65:staffTop+79}">${bassClef?'𝄢':'𝄞'}</text><text class="time-signature" x="176" y="${staffTop+29}">4</text><text class="time-signature" x="176" y="${staffTop+65}">4</text><g class="measure-lines">${bars}</g>${marks}<line class="end-bar-thin" x1="${endBarX-5}" y1="${staffTop}" x2="${endBarX-5}" y2="${staffBottom}"/><line class="end-bar" x1="${endBarX}" y1="${staffTop}" x2="${endBarX}" y2="${staffBottom}"/></g>`;
+    const layouts=events.map(event=>{const x=noteX(event.start+(event.rest?event.duration/2:0)),bare=event.note.replace(/[#b]/,''),match=bare.match(/^([A-G])(\-?\d)$/i),y=event.rest?(staffTop+staffBottom)/2:staffBottom-(pitchIndex(match[1].toUpperCase(),Number(match[2]))-staffBase)*9;return{event,x,y,options:{}};});
+    const beams=[];for(let i=0;i<layouts.length-1;i++){const a=layouts[i],b=layouts[i+1];if(a.event.rest||b.event.rest||a.event.duration!==.5||b.event.duration!==.5||Math.abs(a.event.start+.5-b.event.start)>.001||Math.floor(a.event.start)!==Math.floor(b.event.start))continue;const stemUp=(a.y+b.y)/2>=(staffTop+staffBottom)/2,firstEnd=stemUp?a.y-42:a.y+42,slope=Math.max(-9,Math.min(9,b.y-a.y)),secondEnd=firstEnd+slope;a.options={beamed:true,stemUp,stemEnd:firstEnd};b.options={beamed:true,stemUp,stemEnd:secondEnd};const ax=a.x+(stemUp?7:-7),bx=b.x+(stemUp?7:-7),thickness=stemUp?5:-5;beams.push(`<path class="note-beam" d="M${ax} ${firstEnd} L${bx} ${secondEnd} L${bx} ${secondEnd+thickness} L${ax} ${firstEnd+thickness} Z"/>`);i++;}
+    const marks=layouts.map(({event,x,y,options})=>`<g class="score-event"><title>${escapeText(voice.name)}, beat ${event.start+1}: ${event.rest?'rest':event.note}, ${durationLabel(event.duration)}</title>${notationEventSvg(event,x,y,staffTop,staffBottom,options)}</g>`).join('');
+    return `<g class="score-system${selected?' selected-system':''}" data-system="${voiceIndex}"><rect class="staff-selector" x="0" y="${staffTop-30}" width="${width}" height="${staffGap-5}"/><text class="staff-name" x="52" y="${staffTop+41}" text-anchor="end">${escapeText(voice.name)}</text><g class="staff-lines">${staff}</g><text class="${bassClef?'bass-clef':'treble-clef'}" x="114" y="${bassClef?staffTop+58:staffTop+69}">${bassClef?'𝄢':'𝄞'}</text><text class="time-signature" x="176" y="${staffTop+29}">4</text><text class="time-signature" x="176" y="${staffTop+65}">4</text><g class="measure-lines">${bars}</g>${marks}${beams.join('')}<line class="end-bar-thin" x1="${endBarX-5}" y1="${staffTop}" x2="${endBarX-5}" y2="${staffBottom}"/><line class="end-bar" x1="${endBarX}" y1="${staffTop}" x2="${endBarX}" y2="${staffBottom}"/></g>`;
   }).join('');
   const firstTop=42,lastBottom=42+(voices.length-1)*staffGap+72;
   const middle=(firstTop+lastBottom)/2,span=lastBottom-firstTop;

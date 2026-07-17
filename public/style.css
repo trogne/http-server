@@ -141,10 +141,15 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .value-icon.half::before,.value-icon.whole::before { background:transparent; }
 .value-icon.whole::after { display:none; }
 .value-icon.eighth::after { box-shadow:4px 3px 0 -1px currentColor; }
-.score-paper { overflow-x:auto; padding:8px 0; background:#e9e0cc; scrollbar-color:#9b8356 #d6cbb4; }
-#notation-staff { display:block; min-width:100%; height:250px; outline:none; cursor:crosshair; }
+.score-paper { overflow-x:auto; padding:8px 0; background-color:#e5dbc4; background-image:radial-gradient(ellipse at 18% 12%,rgba(111,77,38,.08),transparent 34%),radial-gradient(ellipse at 76% 72%,rgba(93,62,31,.065),transparent 38%),repeating-linear-gradient(0deg,rgba(65,48,29,.018) 0,rgba(65,48,29,.018) 1px,transparent 1px,transparent 4px); box-shadow:inset 0 0 55px rgba(72,49,26,.15); scrollbar-color:#9b8356 #d6cbb4; }
+#notation-staff { display:block; min-width:100%; outline:none; cursor:crosshair; }
 #notation-staff:focus-visible { box-shadow:inset 0 0 0 3px #b1883d; }
-.score-hit-area { fill:#e9e0cc; }
+.score-hit-area { fill:transparent; }
+.staff-selector { fill:transparent; transition:fill .18s ease; }
+.score-system:hover .staff-selector { fill:rgba(115,82,39,.055); }
+.selected-system .staff-selector { fill:rgba(115,82,39,.075); }
+.staff-name { fill:#574b3b; font:italic 16px "Libre Caslon Display",Georgia,serif; }
+.system-brace { fill:none; stroke:#3a3024; stroke-width:2.5; }
 .staff-lines line,.measure-lines line,.engraved line,.end-bar { stroke:#27221a; stroke-width:1.35; vector-effect:non-scaling-stroke; }
 .measure-lines .barline { stroke-width:1; }
 .measure-number { fill:#796f60; font:500 10px "DM Mono",monospace; }
@@ -152,7 +157,7 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .bass-clef { fill:#201c16; font:62px "Bravura Text","Noto Music","Times New Roman",serif; }
 .time-signature { fill:#27221a; font:700 31px Georgia,serif; text-anchor:middle; }
 .note-head { fill:#201c16; stroke:#201c16; stroke-width:1.5; }
-.note-head.open { fill:#e9e0cc; stroke-width:2.4; }
+.note-head.open { fill:#e5dbc4; stroke-width:2.4; }
 .note-stem { stroke-width:1.8!important; }
 .note-flag,.rest-mark path { fill:none; stroke:#201c16; stroke-width:3.2; stroke-linecap:round; stroke-linejoin:round; }
 .rest-mark rect { fill:#201c16; }
@@ -350,7 +355,7 @@ footer a:hover { color:var(--gold); }
   .voice-console { grid-template-columns:1fr; } .transport { grid-column:auto; flex-wrap:wrap; } .transport button { min-width:calc(50% - 4px); }
   .method,.scholarship,.invitation { padding-top:58px; padding-bottom:58px; } .method-result { grid-template-columns:1fr; text-align:center; } .invitation>a { display:grid; } .invitation>a span { font-size:.68rem; } .result-actions { align-items:flex-start; flex-direction:column; } .methodological-note { align-items:flex-start; flex-direction:column; }
   .examples { gap:10px; } .examples-intro { width:130px; flex-basis:130px; } .examples button { min-width:150px; }
-  .score-toolbar { padding:10px; gap:10px; } .notation-tools button { flex:1 1 auto; justify-content:center; } .tool-divider { display:none; } #notation-staff { height:210px; }
+  .score-toolbar { padding:10px; gap:10px; } .notation-tools button { flex:1 1 auto; justify-content:center; } .tool-divider { display:none; }
   .metric-grid { grid-template-columns:1fr 1fr; } .metric-grid article { min-height:130px; padding:18px; }
   .metric-grid strong { font-size:2.25rem; } .insight { grid-template-columns:1fr; } .ornament { display:none; }
   .history-item { grid-template-columns:38px 1fr; } .history-item b { display:none; }

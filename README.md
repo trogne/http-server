@@ -25,7 +25,7 @@ the resource limits appropriate to your environment.
 - SQLite-backed notes example at `/notes`
 - SQLite-backed JSON Users API at `/users`, with CRUD, search, sorting, and pagination
 - Bach-themed structural melodic analysis at `POST /api/analyze`
-- Dependency-free contrapuntal score editor with multiple voices, flexible meter, expandable measures, rests, accidentals, rhythmic values, and browser audio
+- Dependency-free contrapuntal score editor with multiple voices, flexible meter, expandable measures, selectable events, clef overrides, rests, accidentals, rhythmic values, and browser audio
 - Voice-centered analytical views for interval profile, directional motion, registral behavior, entrances, and events for audition
 - Persistent full-score analysis archive at `GET /api/analyses`, including every contrapuntal voice
 - Neon PostgreSQL persistence in production with an automatic SQLite fallback locally

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050403">
   <meta name="description" content="Patrick Fiset's 25-year practice of attentive, voice-by-voice listening to the counterpoint of J. S. Bach.">
   <title>FisoBach — Enter the Counterpoint</title>
-  <link rel="stylesheet" href="/style.css?v=20260717-studio8">
+  <link rel="stylesheet" href="/style.css?v=20260717-studio9">
 </head>
 <body>
   <a class="skip-link" href="#content">Skip to content</a>
@@ -27,16 +27,6 @@
       </div>
       <figure class="hero-image"><img src="/images/bach-score-study.png" alt="A musician studying a densely notated detail from Bach's autograph score of the opening chorus of Cantata BWV 77" width="1860" height="845" fetchpriority="high"><figcaption>Autograph detail · Opening chorus · Cantata BWV 77</figcaption></figure>
       <div class="hero-seal" aria-hidden="true">COUNTERPOINT<br>LISTENING LAB</div>
-    </section>
-
-    <section id="principles" class="scholarship" aria-labelledby="principles-title">
-      <div class="scholarship-heading"><p class="section-no">ANALYTICAL PRINCIPLES</p><h2 id="principles-title">The score is evidence.<br>The ear is the inquiry.</h2><p>Computational description can direct attention; it cannot replace stylistic judgment. FisoBach keeps that boundary visible.</p></div>
-      <div class="principle-grid">
-        <article><span>OBSERVED</span><h3>What the tool establishes</h3><p>Pitch, duration, onset, register, voice entry, vertical interval, and directional motion are read directly from the entered notation.</p></article>
-        <article><span>HEURISTIC</span><h3>What the tool proposes</h3><p>Imitation, structural convergence, stability, and resolution are listening prompts—useful hypotheses that require the score, context, and ear.</p></article>
-        <article><span>CONTEXTUAL</span><h3>What remains yours</h3><p>Harmony, contrapuntal function, text, rhetoric, affect, tuning, articulation, and historical style belong to a situated musical reading.</p></article>
-      </div>
-      <p class="scholarship-note"><b>Working principle</b> A dissonance is not an error, a parallel is not automatically a fault, and a numerical majority is not musical significance. The lab marks events so that you can listen more precisely.</p>
     </section>
 
     <section class="manifesto" aria-labelledby="manifesto-title">
@@ -61,6 +51,16 @@
       <aside class="method-result"><span>25</span><p><strong>Years of detailed listening</strong>Over time, this process builds a deep, embodied understanding of counterpoint—not only how the voices are written, but how they think together.</p></aside>
     </section>
 
+    <section id="principles" class="scholarship" aria-labelledby="principles-title">
+      <div class="scholarship-heading"><p class="section-no">ANALYTICAL PRINCIPLES</p><h2 id="principles-title">The score is evidence.<br>The ear is the inquiry.</h2><p>Computational description can direct attention; it cannot replace stylistic judgment. FisoBach keeps that boundary visible.</p></div>
+      <div class="principle-grid">
+        <article><span>OBSERVED</span><h3>What the tool establishes</h3><p>Pitch, duration, onset, register, voice entry, vertical interval, and directional motion are read directly from the entered notation.</p></article>
+        <article><span>HEURISTIC</span><h3>What the tool proposes</h3><p>Imitation, structural convergence, stability, and resolution are listening prompts—useful hypotheses that require the score, context, and ear.</p></article>
+        <article><span>CONTEXTUAL</span><h3>What remains yours</h3><p>Harmony, contrapuntal function, text, rhetoric, affect, tuning, articulation, and historical style belong to a situated musical reading.</p></article>
+      </div>
+      <p class="scholarship-note"><b>Working principle</b> A dissonance is not an error, a parallel is not automatically a fault, and a numerical majority is not musical significance. The lab marks events so that you can listen more precisely.</p>
+    </section>
+
     <section class="invitation" aria-labelledby="invitation-title"><p class="section-no">A SHARED INQUIRY</p><h2 id="invitation-title">Do you hear<br>what I hear?</h2><p>I’m looking for listeners, performers, theorists, and patient explorers who enter Bach at this microscopic level. If you recognize this kind of attention, I want to hear from you.</p><a href="mailto:patrick.fiset@gmail.com"><span>patrick.fiset@gmail.com</span><b>Enter the conversation ↗</b></a></section>
 
     <section id="workbench" class="studio" aria-labelledby="studio-title">
@@ -80,18 +80,23 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
               <span class="tool-divider" aria-hidden="true"></span>
               <button type="button" data-accidental="flat" aria-pressed="false">♭ Flat</button><button type="button" data-accidental="natural" class="active" aria-pressed="true">♮ Natural</button><button type="button" data-accidental="sharp" aria-pressed="false">♯ Sharp</button>
             </div>
-            <div class="score-actions"><button type="button" id="undo-note">Undo last</button><button type="button" id="clear-voice">Clear voice</button></div>
+            <div class="score-actions"><button type="button" id="delete-event" disabled>Delete selected</button><button type="button" id="undo-note">Undo last</button><button type="button" id="clear-voice">Clear voice</button></div>
           </div>
           <div class="score-setup" aria-label="Score structure">
             <div class="setup-field"><label for="time-signature">Time signature</label><select id="time-signature"><option value="2/4">2/4</option><option value="3/4">3/4</option><option value="4/4" selected>4/4</option><option value="5/4">5/4</option><option value="6/8">6/8</option><option value="9/8">9/8</option><option value="12/8">12/8</option></select></div>
             <div class="measure-controls"><span>Measures</span><button type="button" id="remove-measure" aria-label="Remove the last empty measure">−</button><output id="measure-count" aria-live="polite">4</output><button type="button" id="add-measure" aria-label="Add a measure">＋</button></div>
             <p id="score-summary"><strong>4 measures · 4/4</strong><span>Quarter-note pulse · click the staff to append an event</span></p>
           </div>
+          <div class="editorial-fields" aria-label="Score details">
+            <label><span>Study title</span><input id="score-title" type="text" maxlength="80" placeholder="Work, movement, or source"></label>
+            <label><span>Selected voice</span><input id="voice-name" type="text" maxlength="32" aria-label="Rename selected voice"></label>
+            <label><span>Clef</span><select id="voice-clef"><option value="auto">Auto</option><option value="treble">Treble</option><option value="bass">Bass</option></select></label>
+          </div>
           <div class="score-paper"><svg id="notation-staff" viewBox="0 0 1200 540" role="img" aria-label="Editable musical score with one staff per voice"></svg></div>
           <div class="score-foot"><p class="score-instruction" id="score-instruction">Click a line or space on any staff to add a note to that voice. The score advances from left to right.</p><p class="engraving-note"><span>Input syntax</span> C4 · C#4/0.5 · R/1</p></div>
         </section>
         <div class="voice-console"><label>Listening focus<select id="voice-select" aria-label="Voice to follow through the analysis"></select><small>Changes the chart, relationships, and solo playback.</small></label><label>Tempo<input id="tempo" type="range" min="45" max="160" value="82"><output id="tempo-value">82 BPM</output></label><div class="transport" aria-label="Playback controls"><button id="play-texture" type="button" aria-pressed="false">▶ Hear in texture</button><button id="play-focus" type="button" aria-pressed="false">◎ Hear focus alone</button><button id="stop-audio" type="button">■ Stop</button></div></div>
-        <div class="form-bar"><div class="examples" aria-labelledby="examples-title"><div class="examples-intro"><strong id="examples-title">Start with an example</strong><span>Load a score, then adapt it in the editor.</span></div><div class="example-list"><button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2"><strong>Fugal entries</strong><small>Three staggered voices</small><em>Load example →</em></button><button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2"><strong>D minor duo</strong><small>Imitative exchange</small><em>Load example →</em></button><button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/1 D5/1 B4/1 C5/2&#10;Lower: R/1 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2"><strong>Leaping duo</strong><small>Wide interval study</small><em>Load example →</em></button></div></div><button class="analyze" type="submit"><span>Analyze fabric</span><b>→</b></button></div>
+        <div class="form-bar"><div class="examples" aria-labelledby="examples-title"><div class="examples-intro"><strong id="examples-title">Start with an example</strong><span>Load a score, then adapt it in the editor.</span></div><div class="example-list"><button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2"><strong>Fugal entries</strong><small>Three staggered voices</small><em>Load example →</em></button><button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2"><strong>D minor duo</strong><small>Imitative exchange</small><em>Load example →</em></button><button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/1 D5/1 B4/1 C5/2&#10;Lower: R/2 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2"><strong>Leaping duo</strong><small>Wide interval study</small><em>Load example →</em></button></div></div><button class="analyze" type="submit"><span>Analyze fabric</span><b>→</b></button></div>
       </form><p id="error" class="error" role="alert"></p>
     </section>
 
@@ -101,6 +106,6 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
   </main>
 
   <footer><span>FisoBach</span><p>Patience · Repetition · Attentive listening</p><a href="mailto:patrick.fiset@gmail.com">patrick.fiset@gmail.com</a></footer>
-  <script src="/app.js?v=20260717-studio8"></script>
+  <script src="/app.js?v=20260717-studio9"></script>
 </body>
 </html>

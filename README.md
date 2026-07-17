@@ -25,6 +25,8 @@ the resource limits appropriate to your environment.
 - SQLite-backed notes example at `/notes`
 - SQLite-backed JSON Users API at `/users`, with CRUD, search, sorting, and pagination
 - Bach-themed structural melodic analysis at `POST /api/analyze`
+- Dependency-free contrapuntal score editor with multiple voices, flexible meter, expandable measures, rests, accidentals, rhythmic values, and browser audio
+- Voice-centered analytical views for interval profile, directional motion, registral behavior, entrances, and events for audition
 - Persistent full-score analysis archive at `GET /api/analyses`, including every contrapuntal voice
 - Neon PostgreSQL persistence in production with an automatic SQLite fallback locally
 - A raw TCP protocol client (`tcp_client`)
@@ -52,8 +54,10 @@ curl or an HTTP client library:
 ./tcp_client 127.0.0.1 8080 /notes
 ```
 
-The home page provides a browser UI for the Users API. Its JSON endpoints are
-`GET /users`, `POST /users`, and `GET`, `PUT`, or `DELETE /users/{id}`. List
+The home page is the FisoBach Counterpoint Listening Lab: a public editorial
+site and interactive score workbench for entering, hearing, and examining
+independent voices. The separate Users API remains available at `GET /users`,
+`POST /users`, and `GET`, `PUT`, or `DELETE /users/{id}`. List
 requests accept `page`, `limit`, `search`, `sort` (`id`, `name`, or `email`),
 and `order` (`asc` or `desc`) query parameters.
 

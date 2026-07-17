@@ -64,12 +64,27 @@
     <section class="invitation" aria-labelledby="invitation-title"><p class="section-no">A SHARED INQUIRY</p><h2 id="invitation-title">Do you hear<br>what I hear?</h2><p>I’m looking for listeners, performers, theorists, and patient explorers who enter Bach at this microscopic level. If you recognize this kind of attention, I want to hear from you.</p><a href="mailto:patrick.fiset@gmail.com"><span>patrick.fiset@gmail.com</span><b>Enter the conversation ↗</b></a></section>
 
     <section id="workbench" class="studio" aria-labelledby="studio-title">
-      <div class="studio-top"><div><p class="section-no">02 · CONTRAPUNTAL LISTENING LAB</p><h2 id="studio-title">Voices in Relation</h2></div><p class="notation-help"><span>Notation guide</span><b>R</b> rest · <b># / ♭</b> accidental · <b>/0.5 /1 /2</b> beats</p></div>
+      <div class="studio-top"><div><p class="section-no">02 · CONTRAPUNTAL LISTENING LAB</p><h2 id="studio-title">Voices in Relation</h2></div><p class="notation-help"><span>Score editor</span>Choose a value, then place a note on the staff.</p></div>
       <form id="analysis-form">
         <label class="sr-only" for="notes">Contrapuntal voices to analyze</label>
-        <textarea id="notes" rows="5" spellcheck="false" placeholder="Voice I: D5/1 E5/0.5 F5/0.5…&#10;Voice II: R/2 D4/1 E4/1…">Voice I: D5/1 A5/0.5 F5/0.5 G5/1 E5/1 F5/0.5 D5/0.5 E5/1 C#5/1 D5/2
+        <textarea id="notes" class="notation-source" rows="5" spellcheck="false" aria-hidden="true" tabindex="-1">Voice I: D5/1 A5/0.5 F5/0.5 G5/1 E5/1 F5/0.5 D5/0.5 E5/1 C#5/1 D5/2
 Voice II: R/2 D4/1 A4/0.5 F4/0.5 G4/1 E4/1 F4/0.5 D4/0.5 E4/1 C#4/1 D4/2
 Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
+        <section class="score-editor" aria-label="Musical score editor">
+          <div class="score-toolbar">
+            <div class="score-voices" id="score-voices" aria-label="Voice to edit"></div>
+            <div class="notation-tools" aria-label="Notation tools">
+              <button type="button" data-kind="note" class="active" aria-pressed="true">Note</button><button type="button" data-kind="rest" aria-pressed="false">Rest</button>
+              <span class="tool-divider" aria-hidden="true"></span>
+              <button type="button" data-duration="0.5" aria-pressed="false"><i class="value-icon eighth"></i>Eighth</button><button type="button" data-duration="1" class="active" aria-pressed="true"><i class="value-icon quarter"></i>Quarter</button><button type="button" data-duration="2" aria-pressed="false"><i class="value-icon half"></i>Half</button><button type="button" data-duration="4" aria-pressed="false"><i class="value-icon whole"></i>Whole</button>
+              <span class="tool-divider" aria-hidden="true"></span>
+              <button type="button" data-accidental="flat" aria-pressed="false">♭ Flat</button><button type="button" data-accidental="natural" class="active" aria-pressed="true">♮ Natural</button><button type="button" data-accidental="sharp" aria-pressed="false">♯ Sharp</button>
+            </div>
+            <div class="score-actions"><button type="button" id="undo-note">Undo last</button><button type="button" id="clear-voice">Clear voice</button></div>
+          </div>
+          <div class="score-paper"><svg id="notation-staff" viewBox="0 0 1200 250" role="img" aria-label="Editable five-line musical staff"></svg></div>
+          <p class="score-instruction" id="score-instruction">Click any line or space to add a note. The score advances from left to right.</p>
+        </section>
         <div class="voice-console"><label>Listening focus<select id="voice-select" aria-label="Voice to follow through the analysis"></select><small>Changes the chart, relationships, and solo playback.</small></label><label>Tempo<input id="tempo" type="range" min="45" max="160" value="82"><output id="tempo-value">82 BPM</output></label><div class="transport" aria-label="Playback controls"><button id="play-texture" type="button" aria-pressed="false">▶ Hear in texture</button><button id="play-focus" type="button" aria-pressed="false">◎ Hear focus alone</button><button id="stop-audio" type="button">■ Stop</button></div></div>
         <div class="form-bar"><div class="examples" aria-labelledby="examples-title"><div class="examples-intro"><strong id="examples-title">Start with an example</strong><span>Load a score, then adapt it in the editor.</span></div><div class="example-list"><button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2"><strong>Fugal entries</strong><small>Three staggered voices</small><em>Load example →</em></button><button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2"><strong>D minor duo</strong><small>Imitative exchange</small><em>Load example →</em></button><button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/2 D5/1 B4/1 C5/2&#10;Lower: R/0.5 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2"><strong>Leaping duo</strong><small>Wide interval study</small><em>Load example →</em></button></div></div><button class="analyze" type="submit"><span>Analyze fabric</span><b>→</b></button></div>
       </form><p id="error" class="error" role="alert"></p>

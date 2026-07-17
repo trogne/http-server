@@ -247,7 +247,9 @@ static bool send_headers(int fd, int status, const char *reason, const char *typ
     int size = snprintf(headers, sizeof(headers),
         "HTTP/1.1 %d %s\r\nDate: %s\r\nServer: %s\r\n"
         "Content-Type: %s\r\nContent-Length: %lld\r\n"
-        "Connection: %s\r\n%s%s\r\n",
+        "Connection: %s\r\nX-Content-Type-Options: nosniff\r\n"
+        "X-Frame-Options: DENY\r\nReferrer-Policy: strict-origin-when-cross-origin\r\n"
+        "Permissions-Policy: camera=(), microphone=(), geolocation=()\r\n%s%s\r\n",
         status, reason, date, SERVER_NAME, type, (long long)length,
         keep_alive ? "keep-alive" : "close", extra ? extra : "", extra ? "\r\n" : "");
     return size > 0 && (size_t)size < sizeof(headers) && send_all(fd, headers, (size_t)size);
@@ -1270,10 +1272,12 @@ static int serve_request(int fd, http_request *request, bool keep_alive, off_t *
                          request->head_only, keep_alive, NULL) ? 404 : -1;
     }
     *bytes = info.st_size;
-    char modified[30], extra[128];
+    char modified[30], extra[192];
+    const char *type = mime_type(relative);
     http_date(modified, info.st_mtime);
-    (void)snprintf(extra, sizeof(extra), "Last-Modified: %s\r\nX-Content-Type-Options: nosniff", modified);
-    bool ok = send_headers(fd, 200, "OK", mime_type(relative), info.st_size, keep_alive, extra);
+    (void)snprintf(extra, sizeof(extra), "Last-Modified: %s\r\nCache-Control: %s", modified,
+                   !strncmp(type, "text/html", 9) ? "no-cache" : "public, max-age=3600");
+    bool ok = send_headers(fd, 200, "OK", type, info.st_size, keep_alive, extra);
     if (ok && !request->head_only) {
         off_t offset = 0;
         while (offset < info.st_size) {

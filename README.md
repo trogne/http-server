@@ -15,7 +15,7 @@ the resource limits appropriate to your environment.
 - Static files rooted beneath a configured directory
 - Traversal and symlink escape protection
 - MIME types for common web, image, font, media, and WebAssembly files
-- `Content-Length`, `Date`, `Last-Modified`, and defensive response headers
+- `Content-Length`, `Date`, `Last-Modified`, security headers, and static cache policy
 - Bounded connection queue and fixed-size pthread worker pool
 - Common-style access logs with response time in microseconds
 - Strict startup validation and graceful `SIGINT`/`SIGTERM` shutdown
@@ -60,6 +60,22 @@ independent voices. The separate Users API remains available at `GET /users`,
 `POST /users`, and `GET`, `PUT`, or `DELETE /users/{id}`. List
 requests accept `page`, `limit`, `search`, `sort` (`id`, `name`, or `email`),
 and `order` (`asc` or `desc`) query parameters.
+
+### Score notation
+
+The visual editor writes a compact, human-readable score source. Each line is a
+named voice followed by pitch and duration tokens:
+
+```text
+Upper: C5/1 G5/0.5 E5/0.5 A5/1
+Lower: R/0.5 C4/0.5 E4/1 G4/1
+```
+
+Durations are measured in quarter-note beats: `4` whole, `2` half, `1`
+quarter, `0.5` eighth, `0.25` sixteenth, `0.125` thirty-second, and `0.0625`
+sixty-fourth. Use `R` for a rest. Add `t` to a duration for a 3:2 triplet, such
+as `C5/0.5t`. A named line may be empty (`Upper:`); the editor does not insert a
+placeholder rest.
 
 User reads are public. `POST`, `PUT`, and `DELETE` require an API token supplied
 as `Authorization: Bearer TOKEN`. Set a secret of at least 16 characters in the
@@ -119,7 +135,8 @@ regardless of argument order.
 
 ## Test
 
-The test suite covers static content, MIME types, `HEAD`, keep-alive reuse,
+The test suite covers score-editor source contracts, preset rhythms, static
+content, cache and security headers, MIME types, `HEAD`, keep-alive reuse,
 dynamic endpoints, malformed requests, traversal attempts, logging, and 200
 concurrent requests:
 

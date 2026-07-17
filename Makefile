@@ -20,6 +20,7 @@ tcp_client: client.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 test: http_server
+	python3 tests/test_frontend.py
 	python3 tests/test_server.py ./http_server
 
 benchmark: http_server

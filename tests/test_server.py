@@ -94,10 +94,15 @@ def main():
             assert status == 200 and body == b"<h1>static home</h1>\n"
             assert headers["Content-Type"].startswith("text/html")
             assert headers["X-Content-Type-Options"] == "nosniff"
+            assert headers["X-Frame-Options"] == "DENY"
+            assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+            assert headers["Permissions-Policy"] == "camera=(), microphone=(), geolocation=()"
+            assert headers["Cache-Control"] == "no-cache"
 
             status, headers, body = request(port, path="/app.css?cache=1")
             assert status == 200 and body.startswith(b"body")
             assert headers["Content-Type"].startswith("text/css")
+            assert headers["Cache-Control"] == "public, max-age=3600"
 
             status, headers, body = request(port, "HEAD", "/data.bin")
             assert status == 200 and body == b"" and headers["Content-Length"] == "3"

@@ -194,6 +194,7 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .staff-lines line,.measure-lines line,.engraved line,.end-bar { stroke:#27221a; stroke-width:1.35; vector-effect:non-scaling-stroke; }
 .measure-lines .barline { stroke-width:1; }
 .measure-number { fill:#796f60; font:500 10px "DM Mono",monospace; }
+.empty-staff-message { fill:#8d806e; font:italic 12px "Libre Caslon Display",Georgia,serif; letter-spacing:.025em; }
 .treble-clef { fill:#201c16; font:76px "Bravura Text","Noto Music","Times New Roman",serif; }
 .bass-clef { fill:#201c16; font:62px "Bravura Text","Noto Music","Times New Roman",serif; }
 .time-signature { fill:#27221a; font:700 31px Georgia,serif; text-anchor:middle; }

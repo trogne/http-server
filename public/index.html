@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050403">
   <meta name="description" content="Patrick Fiset's 25-year practice of attentive, voice-by-voice listening to the counterpoint of J. S. Bach.">
   <title>FisoBach — Enter the Counterpoint</title>
-  <link rel="stylesheet" href="/style.css?v=20260717-studio9">
+  <link rel="stylesheet" href="/style.css?v=20260717-rhythm10">
 </head>
 <body>
   <a class="skip-link" href="#content">Skip to content</a>
@@ -74,11 +74,27 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
           <div class="score-toolbar">
             <div class="score-voices" aria-label="Voice to edit"><div id="score-voices"></div><button type="button" id="add-voice" class="icon-action" aria-label="Add another voice" title="Add another voice">＋ Voice</button><button type="button" id="remove-voice" class="icon-action danger" aria-label="Remove selected voice" title="Remove selected voice">−</button></div>
             <div class="notation-tools" aria-label="Notation tools">
-              <button type="button" data-kind="note" class="active" aria-pressed="true">Note</button><button type="button" data-kind="rest" aria-pressed="false"><i class="rest-tool-icon">𝄽</i> Rest</button>
-              <span class="tool-divider" aria-hidden="true"></span>
-              <button type="button" data-duration="0.5" aria-pressed="false"><i class="value-icon eighth"></i>Eighth</button><button type="button" data-duration="1" class="active" aria-pressed="true"><i class="value-icon quarter"></i>Quarter</button><button type="button" data-duration="2" aria-pressed="false"><i class="value-icon half"></i>Half</button><button type="button" data-duration="4" aria-pressed="false"><i class="value-icon whole"></i>Whole</button>
-              <span class="tool-divider" aria-hidden="true"></span>
-              <button type="button" data-accidental="flat" aria-pressed="false">♭ Flat</button><button type="button" data-accidental="natural" class="active" aria-pressed="true">♮ Natural</button><button type="button" data-accidental="sharp" aria-pressed="false">♯ Sharp</button>
+              <svg class="notation-symbols" aria-hidden="true">
+                <symbol id="symbol-note-filled" viewBox="0 0 20 28"><ellipse cx="6.7" cy="22" rx="5.4" ry="3.8" transform="rotate(-18 6.7 22)"/><path d="M11.3 21.5V3h1.8v18.5z"/></symbol>
+                <symbol id="symbol-note-open" viewBox="0 0 20 28"><ellipse cx="6.7" cy="22" rx="5.4" ry="3.8" transform="rotate(-18 6.7 22)"/><ellipse cx="6.7" cy="22" rx="3.3" ry="1.7" transform="rotate(-18 6.7 22)" fill="var(--tool-bg,#1c1913)"/><path d="M11.3 21.5V3h1.8v18.5z"/></symbol>
+                <symbol id="symbol-note-whole" viewBox="0 0 20 28"><ellipse cx="10" cy="17" rx="7.2" ry="4.7" transform="rotate(-10 10 17)"/><ellipse cx="10" cy="17" rx="4.2" ry="2.1" transform="rotate(-10 10 17)" fill="var(--tool-bg,#1c1913)"/></symbol>
+                <symbol id="symbol-flag" viewBox="0 0 20 28"><use href="#symbol-note-filled"/><path d="M12.2 3c5.5 1.7 7.4 6.2 5.1 10.7-.9 1.8-2.3 3.1-4.1 4 2-3.2 2.8-7.2-1-9.1z"/></symbol>
+                <symbol id="symbol-note-16" viewBox="0 0 20 28"><use href="#symbol-flag"/><path d="M12.2 8c5 1.4 6.7 5.1 4.7 8.9-.8 1.5-2 2.6-3.7 3.4 1.8-2.7 2.4-6-1-7.6z"/></symbol>
+                <symbol id="symbol-note-32" viewBox="0 0 20 28"><use href="#symbol-note-16"/><path d="M12.2 13c4.5 1.2 6 4.2 4.2 7.3-.7 1.2-1.8 2.1-3.2 2.8 1.5-2.2 2-4.9-1-6.2z"/></symbol>
+                <symbol id="symbol-note-64" viewBox="0 0 20 28"><use href="#symbol-note-32"/><path d="M12.2 18c4 1 5.3 3.2 3.7 5.8-.7 1-1.6 1.7-2.7 2.2 1.2-1.7 1.6-3.7-1-4.8z"/></symbol>
+              </svg>
+              <div class="tool-group kind-tools"><span>Entry</span><div><button type="button" data-kind="note" class="active" aria-pressed="true">Note</button><button type="button" data-kind="rest" aria-pressed="false"><i class="rest-tool-icon">𝄽</i> Rest</button></div></div>
+              <div class="tool-group rhythm-tools"><span>Rhythm value</span><div>
+                <button type="button" data-duration="0.0625" aria-pressed="false" title="Sixty-fourth note"><svg class="value-icon" aria-hidden="true"><use href="#symbol-note-64"/></svg><b>64th</b></button>
+                <button type="button" data-duration="0.125" aria-pressed="false" title="Thirty-second note"><svg class="value-icon" aria-hidden="true"><use href="#symbol-note-32"/></svg><b>32nd</b></button>
+                <button type="button" data-duration="0.25" aria-pressed="false" title="Sixteenth note"><svg class="value-icon" aria-hidden="true"><use href="#symbol-note-16"/></svg><b>16th</b></button>
+                <button type="button" data-duration="0.5" aria-pressed="false"><svg class="value-icon" aria-hidden="true"><use href="#symbol-flag"/></svg><b>Eighth</b></button>
+                <button type="button" data-duration="1" class="active" aria-pressed="true"><svg class="value-icon" aria-hidden="true"><use href="#symbol-note-filled"/></svg><b>Quarter</b></button>
+                <button type="button" data-duration="2" aria-pressed="false"><svg class="value-icon" aria-hidden="true"><use href="#symbol-note-open"/></svg><b>Half</b></button>
+                <button type="button" data-duration="4" aria-pressed="false"><svg class="value-icon" aria-hidden="true"><use href="#symbol-note-whole"/></svg><b>Whole</b></button>
+              </div></div>
+              <div class="tool-group expression-tools"><span>Modifier</span><div><button type="button" id="triplet-tool" data-tuplet="triplet" aria-pressed="false" title="Fit three notes in the time of two"><i class="triplet-icon">3</i> Triplet <small>3:2</small></button></div></div>
+              <div class="tool-group accidental-tools"><span>Accidental</span><div><button type="button" data-accidental="flat" aria-pressed="false" title="Flat">♭</button><button type="button" data-accidental="natural" class="active" aria-pressed="true" title="Natural">♮</button><button type="button" data-accidental="sharp" aria-pressed="false" title="Sharp">♯</button></div></div>
             </div>
             <div class="score-actions"><button type="button" id="delete-event" disabled>Delete selected</button><button type="button" id="undo-note">Undo last</button><button type="button" id="clear-voice">Clear voice</button></div>
           </div>
@@ -93,7 +109,7 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
             <label><span>Clef</span><select id="voice-clef"><option value="auto">Auto</option><option value="treble">Treble</option><option value="bass">Bass</option></select></label>
           </div>
           <div class="score-paper"><svg id="notation-staff" viewBox="0 0 1200 540" role="img" aria-label="Editable musical score with one staff per voice"></svg></div>
-          <div class="score-foot"><p class="score-instruction" id="score-instruction">Click a line or space on any staff to add a note to that voice. The score advances from left to right.</p><p class="engraving-note"><span>Input syntax</span> C4 · C#4/0.5 · R/1</p></div>
+          <div class="score-foot"><p class="score-instruction" id="score-instruction"><strong>Quarter note selected.</strong> Click a line or space on any staff to add it. The score advances from left to right.</p><p class="engraving-note"><span>Input syntax</span> C4 · C#4/0.5 · R/0.25 · G4/0.5t</p></div>
         </section>
         <div class="voice-console"><label>Listening focus<select id="voice-select" aria-label="Voice to follow through the analysis"></select><small>Changes the chart, relationships, and solo playback.</small></label><label>Tempo<input id="tempo" type="range" min="45" max="160" value="82"><output id="tempo-value">82 BPM</output></label><div class="transport" aria-label="Playback controls"><button id="play-texture" type="button" aria-pressed="false">▶ Hear in texture</button><button id="play-focus" type="button" aria-pressed="false">◎ Hear focus alone</button><button id="stop-audio" type="button">■ Stop</button></div></div>
         <div class="form-bar"><div class="examples" aria-labelledby="examples-title"><div class="examples-intro"><strong id="examples-title">Start with an example</strong><span>Load a score, then adapt it in the editor.</span></div><div class="example-list"><button type="button" data-notes="Voice I: D5/1 A5/0.5 F5/0.5 G5 E5 F5/0.5 D5/0.5 E5 C#5 D5/2&#10;Voice II: R/2 D4 A4/0.5 F4/0.5 G4 E4 F4/0.5 D4/0.5 E4 C#4 D4/2&#10;Bass: R/4 D3/2 F3 E3 D3/2 A2/2 D3/2"><strong>Fugal entries</strong><small>Three staggered voices</small><em>Load example →</em></button><button type="button" data-notes="Voice I: D5/0.5 E5/0.5 F5/1 A5/1 G5/0.5 F5/0.5 E5/2&#10;Voice II: R/1 D4/1 F4/0.5 G4/0.5 A4/1 C5/1 B4/2"><strong>D minor duo</strong><small>Imitative exchange</small><em>Load example →</em></button><button type="button" data-notes="Upper: C5/1 G5/0.5 E5/0.5 A5/1 F5/1 D5/1 B4/1 C5/2&#10;Lower: R/2 C4/0.5 E4/1 G4/1 F4/0.5 A4/0.5 B4/2 G4/1 C5/2"><strong>Leaping duo</strong><small>Wide interval study</small><em>Load example →</em></button></div></div><button class="analyze" type="submit"><span>Analyze fabric</span><b>→</b></button></div>
@@ -106,6 +122,6 @@ Bass: R/4 D3/2 F3/1 E3/1 D3/2 A2/2 D3/2</textarea>
   </main>
 
   <footer><span>FisoBach</span><p>Patience · Repetition · Attentive listening</p><a href="mailto:patrick.fiset@gmail.com">patrick.fiset@gmail.com</a></footer>
-  <script src="/app.js?v=20260717-studio9"></script>
+  <script src="/app.js?v=20260717-rhythm10"></script>
 </body>
 </html>

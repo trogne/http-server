@@ -147,9 +147,10 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .score-hit-area { fill:transparent; }
 .staff-selector { fill:transparent; transition:fill .18s ease; }
 .score-system:hover .staff-selector { fill:rgba(115,82,39,.055); }
-.selected-system .staff-selector { fill:rgba(115,82,39,.075); }
-.staff-name { fill:#574b3b; font:italic 16px "Libre Caslon Display",Georgia,serif; }
-.system-brace { fill:none; stroke:#3a3024; stroke-width:2.5; }
+.selected-system .staff-selector { fill:transparent; }
+.selected-system .staff-name { fill:#261f17; font-weight:600; }
+.staff-name { fill:#574b3b; font:italic 14px "Libre Caslon Display",Georgia,serif; }
+.system-brace { fill:none; stroke:#30271d; stroke-width:5; stroke-linecap:round; stroke-linejoin:round; }
 .staff-lines line,.measure-lines line,.engraved line,.end-bar { stroke:#27221a; stroke-width:1.35; vector-effect:non-scaling-stroke; }
 .measure-lines .barline { stroke-width:1; }
 .measure-number { fill:#796f60; font:500 10px "DM Mono",monospace; }
@@ -157,12 +158,14 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .bass-clef { fill:#201c16; font:62px "Bravura Text","Noto Music","Times New Roman",serif; }
 .time-signature { fill:#27221a; font:700 31px Georgia,serif; text-anchor:middle; }
 .note-head { fill:#201c16; stroke:#201c16; stroke-width:1.5; }
-.note-head.open { fill:#e5dbc4; stroke-width:2.4; }
+.open-note-head>ellipse:first-child { fill:#201c16; }
+.open-note-head .note-cutout { fill:#e5dbc4; stroke:none; }
 .note-stem { stroke-width:1.8!important; }
 .note-flag,.rest-mark path { fill:none; stroke:#201c16; stroke-width:3.2; stroke-linecap:round; stroke-linejoin:round; }
 .rest-mark rect { fill:#201c16; }
 .score-accidental { fill:#201c16; font:31px "Bravura Text","Noto Music",Georgia,serif; text-anchor:middle; }
 .end-bar { stroke-width:4; }
+.end-bar-thin { stroke:#27221a; stroke-width:1.2; }
 .score-event { transition:opacity .15s ease; }
 .score-event:hover { opacity:.55; }
 .score-instruction { margin:0; padding:10px 18px 12px; border-top:1px solid rgba(55,48,37,.35); color:#877e70; font:500 .58rem "DM Mono",monospace; letter-spacing:.035em; }

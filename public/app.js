@@ -67,16 +67,14 @@ function setScoreSource(voices) {
 function notationEventSvg(event,x,y,staffTop,staffBottom) {
   const duration=event.duration,up=y>=(staffTop+staffBottom)/2,stemX=up?x+7:x-7,stemEnd=up?y-42:y+42;
   if(event.rest){
-    if(duration===4)return `<g class="engraved rest-mark" aria-label="whole rest"><rect x="${x-9}" y="${staffTop+36}" width="18" height="7" rx="1"/></g>`;
-    if(duration===2)return `<g class="engraved rest-mark" aria-label="half rest"><rect x="${x-9}" y="${staffTop+29}" width="18" height="7" rx="1"/></g>`;
-    if(duration===.5)return `<g class="engraved rest-mark" aria-label="eighth rest"><path d="M${x-5} ${staffTop+34}q16 8 5 23q-8 13-3 26M${x+5} ${staffTop+41}l10-7"/></g>`;
-    return `<g class="engraved rest-mark" aria-label="quarter rest"><path d="M${x+4} ${staffTop+25}l-10 21l12 13l-10 16l12 9l-5 12"/></g>`;
+    const rests={'.5':['𝄾','eighth',10],1:['𝄽','quarter',10],2:['𝄼','half',5],4:['𝄻','whole',5]},[glyph,label,offset]=rests[String(duration)]||rests[1];
+    return `<text class="rest-glyph rest-${label}" x="${x}" y="${(staffTop+staffBottom)/2+offset}" aria-label="${label} rest">${glyph}</text>`;
   }
   const ledger=[];for(let ly=staffBottom+18;ly<=y+2;ly+=18)ledger.push(`<line x1="${x-14}" x2="${x+14}" y1="${ly}" y2="${ly}"/>`);for(let ly=staffTop-18;ly>=y-2;ly-=18)ledger.push(`<line x1="${x-14}" x2="${x+14}" y1="${ly}" y2="${ly}"/>`);
   const accidental=event.note.includes('#')?'♯':event.note.includes('b')?'♭':'';
   const open=duration>=2,head=open?`<g class="open-note-head" transform="rotate(-18 ${x} ${y})"><ellipse cx="${x}" cy="${y}" rx="9.5" ry="6.8"/><ellipse class="note-cutout" cx="${x}" cy="${y}" rx="5.4" ry="3.5"/></g>`:`<ellipse cx="${x}" cy="${y}" rx="9" ry="6.5" transform="rotate(-18 ${x} ${y})" class="note-head"/>`;
   const stem=duration===4?'':`<line class="note-stem" x1="${stemX}" y1="${y}" x2="${stemX}" y2="${stemEnd}"/>`;
-  const flag=duration===.5?`<path class="note-flag" d="M${stemX} ${stemEnd}q${up?20:-20} ${up?8:-8} ${up?12:-12} ${up?25:-25}"/>`:'';
+  const flag=duration===.5?`<path class="note-flag" d="M${stemX} ${stemEnd}q20 ${up?8:-8} 12 ${up?25:-25}"/>`:'';
   return `<g class="engraved note-mark" aria-label="${event.note}, ${durationLabel(duration)} note">${ledger.join('')}${accidental?`<text class="score-accidental" x="${x-22}" y="${y+7}">${accidental}</text>`:''}${stem}${flag}${head}</g>`;
 }
 

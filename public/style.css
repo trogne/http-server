@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Libre+Caslon+Display&family=Manrope:wght@400;500;600;700&display=swap');
+@font-face { font-family:"Noto Music"; font-style:normal; font-weight:400; font-display:swap; src:url('https://fonts.gstatic.com/s/notomusic/v21/pe0rMIiSN5pO63htf1sxItc.ttf') format('truetype'); }
 
 :root { color-scheme: dark; --ink:#e9e2d4; --muted:#989284; --gold:#caa45d; --line:#39352d; --paper:#13110d; --card:#1a1813; --deep:#0d0c09; font: 16px/1.5 Manrope,system-ui,sans-serif; }
 * { box-sizing:border-box; }
@@ -132,6 +133,7 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .score-voices i { width:13px; height:2px; margin-right:6px; background:var(--voice); }
 .notation-tools { justify-content:center; }
 .notation-tools button { display:inline-flex; align-items:center; gap:7px; }
+.rest-tool-icon { font:21px/1 "Noto Music","Segoe UI Symbol","Apple Symbols",serif; font-style:normal; }
 .tool-divider { width:1px; height:28px; margin:0 3px; background:var(--line); }
 .score-actions { justify-content:flex-end; }
 .score-actions button { border-color:transparent; background:transparent; }
@@ -161,8 +163,8 @@ form { border:1px solid #4a4438; background:var(--deep); box-shadow:0 30px 80px 
 .open-note-head>ellipse:first-child { fill:#201c16; }
 .open-note-head .note-cutout { fill:#e5dbc4; stroke:none; }
 .note-stem { stroke-width:1.8!important; }
-.note-flag,.rest-mark path { fill:none; stroke:#201c16; stroke-width:3.2; stroke-linecap:round; stroke-linejoin:round; }
-.rest-mark rect { fill:#201c16; }
+.note-flag { fill:none; stroke:#201c16; stroke-width:3.2; stroke-linecap:round; stroke-linejoin:round; }
+.rest-glyph { fill:#201c16; font:48px "Noto Music","Segoe UI Symbol","Apple Symbols",serif; text-anchor:middle; dominant-baseline:central; }
 .score-accidental { fill:#201c16; font:31px "Bravura Text","Noto Music",Georgia,serif; text-anchor:middle; }
 .end-bar { stroke-width:4; }
 .end-bar-thin { stroke:#27221a; stroke-width:1.2; }
